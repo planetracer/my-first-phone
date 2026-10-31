@@ -638,6 +638,12 @@ final class FamilyStore: ObservableObject {
         do {
             let db = try database
 
+            // Phones set up before the ringtone existed still have the old
+            // subscriptions, and CloudKit will not change one in place, so
+            // clear them out before saving these.
+            _ = try? await db.deleteSubscription(withID: "family-messages")
+            _ = try? await db.deleteSubscription(withID: "family-calls")
+
             let messageSub = CKQuerySubscription(
                 recordType: "FamilyMessage",
                 predicate: NSPredicate(format: "code == %@", code),
@@ -661,7 +667,10 @@ final class FamilyStore: ObservableObject {
             let callInfo = CKSubscription.NotificationInfo()
             callInfo.title = "My First Phone"
             callInfo.alertBody = "Your family is calling! Tap to answer."
-            callInfo.soundName = "default"
+            // A 27 second ring instead of a one second alert tone, so a closed
+            // phone sounds like a phone. Waking the app for a native CallKit
+            // ring would need VoIP pushes, which CloudKit cannot send.
+            callInfo.soundName = "ringtone.caf"
             callInfo.desiredKeys = ["sender"]
             // Wakes the app in the background so CallKit can ring natively.
             callInfo.shouldSendContentAvailable = true

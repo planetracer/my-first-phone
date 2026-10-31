@@ -17,6 +17,8 @@ final class CallKitManager: NSObject, CXProviderDelegate {
     override init() {
         let config = CXProviderConfiguration()
         config.supportsVideo = true
+        // A real ring rather than the default alert tone.
+        config.ringtoneSound = "ringtone.caf"
         config.maximumCallGroups = 1
         config.maximumCallsPerCallGroup = 1
         config.supportedHandleTypes = [.generic]
@@ -25,7 +27,9 @@ final class CallKitManager: NSObject, CXProviderDelegate {
         provider.setDelegate(self, queue: nil)
     }
 
-    func reportIncoming(from caller: String) {
+    /// Rings through the system call screen. `fallback` runs when CallKit
+    /// could not take the call, so the app can ring by itself instead.
+    func reportIncoming(from caller: String, fallback: (() -> Void)? = nil) {
         guard currentUUID == nil else { return }
         let uuid = UUID()
         currentUUID = uuid
@@ -34,7 +38,9 @@ final class CallKitManager: NSObject, CXProviderDelegate {
         update.localizedCallerName = caller
         update.hasVideo = true
         provider.reportNewIncomingCall(with: uuid, update: update) { [weak self] error in
-            if error != nil { self?.currentUUID = nil }
+            guard error != nil else { return }
+            self?.currentUUID = nil
+            DispatchQueue.main.async { fallback?() }
         }
     }
 
@@ -106,7 +112,12 @@ final class CallEngine: NSObject, ObservableObject {
         didSet {
             guard phase != oldValue else { return }
             switch phase {
-            case .incoming: Ringer.shared.start(incoming: true)
+            case .incoming:
+                // CallKit rings with the system call screen where it can;
+                // ringing here as well would give two ringtones at once.
+                if !CallKitManager.shared.hasCall {
+                    Ringer.shared.start(incoming: true)
+                }
             case .outgoing: Ringer.shared.start(incoming: false)
             default: Ringer.shared.stop()
             }
@@ -226,8 +237,12 @@ final class CallEngine: NSObject, ObservableObject {
         pendingOfferSDP = offer.sdp
         callID = offer.callID
         peerName = offer.sender
+        // Ask CallKit first, so the phase change below can tell whether the
+        // system is handling the ring.
+        CallKitManager.shared.reportIncoming(from: offer.sender) {
+            Ringer.shared.start(incoming: true)
+        }
         phase = .incoming(offer.sender)
-        CallKitManager.shared.reportIncoming(from: offer.sender)
     }
 
     // MARK: - Call setup
