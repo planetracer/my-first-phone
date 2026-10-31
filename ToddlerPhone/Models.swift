@@ -209,9 +209,16 @@ final class AppModel: ObservableObject {
         quietOverrideUntil = end
     }
 
-    /// 4-digit code protecting the grown-ups area. Changeable by the parent.
+    /// 4-digit code protecting the grown-ups area. When the phone belongs to
+    /// a family, the family's shared code wins, so every phone opens with the
+    /// same one and a grown-up only has to change it in one place.
     var parentCode: String {
-        get { UserDefaults.standard.string(forKey: "parentCode") ?? Self.defaultParentCode }
+        get {
+            if let shared = UserDefaults.standard.string(forKey: "familyPasscode"), shared.count == 4 {
+                return shared
+            }
+            return UserDefaults.standard.string(forKey: "parentCode") ?? Self.defaultParentCode
+        }
         set {
             objectWillChange.send()
             UserDefaults.standard.set(newValue, forKey: "parentCode")

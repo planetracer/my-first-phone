@@ -49,6 +49,7 @@ enum Sfx {
     static func received() { ToneEngine.shared.play("received") }
     static func pop() { ToneEngine.shared.play("pop") }
     static func ring() { ToneEngine.shared.play("ring") }
+    static func ringback() { ToneEngine.shared.play("ringback") }
 
     static func dtmf(_ digit: Int) {
         ToneEngine.shared.play("dtmf\(digit)")
@@ -88,7 +89,11 @@ final class ToneEngine {
     private static let sampleRate = 44100.0
 
     init() {
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+        // Mix with whatever is already playing, so opening the app does not
+        // stop a grown-up's music. Still audible with the ringer switch off.
+        try? AVAudioSession.sharedInstance().setCategory(
+            .playback, mode: .default, options: [.mixWithOthers]
+        )
         try? AVAudioSession.sharedInstance().setActive(true)
 
         engine.attach(player)
@@ -271,7 +276,9 @@ final class ToneEngine {
 
         // US ringback: 440+480 Hz, two short bursts.
         let burst = sustained([440, 480], duration: 0.55, volume: 0.16)
-        buffers["ring"] = buffer(from: burst + silence(0.25) + burst)
+        // An old fashioned double ring, and the softer purr the caller hears.
+        buffers["ring"] = buffer(from: burst + silence(0.18) + burst)
+        buffers["ringback"] = buffer(from: sustained([440, 480], duration: 0.9, volume: 0.10))
 
         // Real DTMF frequency pairs for the dial pad.
         let rows = [697.0, 770.0, 852.0, 941.0]
@@ -399,6 +406,42 @@ final class Speaker {
     }
 
     func stop() { synth.stopSpeaking(at: .immediate) }
+}
+
+/// Rings like a phone until someone picks up: a burst every couple of
+/// seconds, with a thump so it is felt as well as heard.
+@MainActor
+final class Ringer {
+    static let shared = Ringer()
+
+    private var task: Task<Void, Never>?
+
+    private init() {}
+
+    var isRinging: Bool { task != nil }
+
+    /// `incoming` rings out loud with haptics; otherwise it is the quieter
+    /// purr the caller hears while they wait.
+    func start(incoming: Bool) {
+        stop()
+        task = Task { @MainActor in
+            while !Task.isCancelled {
+                if incoming {
+                    Sfx.ring()
+                    Sfx.bump(.heavy)
+                    try? await Task.sleep(for: .seconds(2.1))
+                } else {
+                    Sfx.ringback()
+                    try? await Task.sleep(for: .seconds(3.0))
+                }
+            }
+        }
+    }
+
+    func stop() {
+        task?.cancel()
+        task = nil
+    }
 }
 
 struct BouncyButtonStyle: ButtonStyle {

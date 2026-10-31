@@ -873,6 +873,11 @@ struct VideoPlayerScreen: View {
     }
 
     private func start() {
+        // A show is the one thing that should take the audio over: nobody
+        // wants a cartoon and a podcast at the same time.
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+        try? AVAudioSession.sharedInstance().setActive(true)
+
         let item = AVPlayerItem(url: url)
         player.replaceCurrentItem(with: item)
         player.play()
@@ -901,6 +906,10 @@ struct VideoPlayerScreen: View {
 
     private func stop() {
         player.pause()
+        // Back to mixing, so the app's bleeps do not interrupt anything.
+        try? AVAudioSession.sharedInstance().setCategory(
+            .playback, mode: .default, options: [.mixWithOthers]
+        )
         if let timeObserver {
             player.removeTimeObserver(timeObserver)
         }

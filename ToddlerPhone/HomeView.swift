@@ -51,6 +51,7 @@ struct RootView: View {
                     lastStatusPush = .now
                     await FamilyStore.shared.publishStatus()
                     _ = await FamilyStore.shared.fetchStatuses()
+                    await FamilyStore.shared.fetchFamilyPasscode()
                 }
                 try? await Task.sleep(for: .seconds(4))
             }

@@ -102,7 +102,16 @@ final class CallEngine: NSObject, ObservableObject {
         case ended(String)
     }
 
-    @Published var phase: Phase = .idle
+    @Published var phase: Phase = .idle {
+        didSet {
+            guard phase != oldValue else { return }
+            switch phase {
+            case .incoming: Ringer.shared.start(incoming: true)
+            case .outgoing: Ringer.shared.start(incoming: false)
+            default: Ringer.shared.stop()
+            }
+        }
+    }
     @Published var peerName = "Family"
     @Published var isMuted = false {
         didSet { audioTrack?.isEnabled = !isMuted }
@@ -159,7 +168,6 @@ final class CallEngine: NSObject, ObservableObject {
         callTarget = member ?? ""
         callID = UUID().uuidString
         phase = .outgoing
-        Sfx.ring()
         Task { await placeOffer() }
     }
 
@@ -220,8 +228,6 @@ final class CallEngine: NSObject, ObservableObject {
         peerName = offer.sender
         phase = .incoming(offer.sender)
         CallKitManager.shared.reportIncoming(from: offer.sender)
-        Sfx.ring()
-        Sfx.bump(.heavy)
     }
 
     // MARK: - Call setup
@@ -433,6 +439,7 @@ final class CallEngine: NSObject, ObservableObject {
     }
 
     private func reset(_ message: String) {
+        Ringer.shared.stop()
         pollTask?.cancel()
         pollTask = nil
         stopVideo()
@@ -447,7 +454,10 @@ final class CallEngine: NSObject, ObservableObject {
         isMuted = false
         speakerOn = true
         CallKitManager.shared.reportEnded()
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+        // Hand the audio back to whatever the grown-up was listening to.
+        try? AVAudioSession.sharedInstance().setCategory(
+            .playback, mode: .default, options: [.mixWithOthers]
+        )
 
         if message.isEmpty {
             phase = .idle

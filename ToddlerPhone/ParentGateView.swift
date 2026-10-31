@@ -111,9 +111,18 @@ struct CodePadView: View {
                 Sfx.bump()
                 onSuccess()
             } else {
-                Sfx.bump(.heavy)
-                shake = true
+                let attempt = entered
                 Task { @MainActor in
+                    // A grown-up may have changed the family code on another
+                    // phone since this one last checked, so ask before saying no.
+                    if FamilyStore.shared.isConnected,
+                       await FamilyStore.shared.fetchFamilyPasscode() == attempt {
+                        Sfx.bump()
+                        onSuccess()
+                        return
+                    }
+                    Sfx.bump(.heavy)
+                    shake = true
                     try? await Task.sleep(for: .seconds(0.3))
                     shake = false
                     entered = ""
@@ -140,6 +149,29 @@ struct ParentGateView: View {
     @StateObject private var familyStore = FamilyStore.shared
     @State private var joinCode = ""
     @State private var showFamilyMembers = false
+    @State private var savingCode = false
+
+    /// Only a grown-up's phone may change the family's code. A phone that is
+    /// not in a family keeps its own code, so it can always be changed there.
+    private var canEditParentCode: Bool {
+        !familyStore.isConnected || model.role == .parent
+    }
+
+    private func saveParentCode() {
+        let code = newCode
+        guard code.count == 4 else { return }
+        savingCode = true
+        Task { @MainActor in
+            if familyStore.isConnected {
+                _ = await familyStore.setFamilyPasscode(code)
+            } else {
+                model.parentCode = code
+            }
+            savingCode = false
+            newCode = ""
+            codeSaved = true
+        }
+    }
 
     private var roleBinding: Binding<PhoneRole> {
         Binding(
@@ -275,22 +307,28 @@ struct ParentGateView: View {
                 }
 
                 Section("Grown-ups code") {
-                    Text("This code protects this settings area inside the app.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                    HStack {
-                        TextField("New 4-digit code", text: $newCode)
-                            .keyboardType(.numberPad)
-                            .onChange(of: newCode) { _ in
-                                newCode = String(newCode.filter(\.isNumber).prefix(4))
-                                codeSaved = false
+                    if canEditParentCode {
+                        Text(familyStore.isConnected
+                             ? "This code protects the grown-ups area on every phone in your family. Change it here and the other phones pick it up."
+                             : "This code protects this settings area inside the app.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                        HStack {
+                            TextField("New 4-digit code", text: $newCode)
+                                .keyboardType(.numberPad)
+                                .onChange(of: newCode) { _ in
+                                    newCode = String(newCode.filter(\.isNumber).prefix(4))
+                                    codeSaved = false
+                                }
+                            Button(savingCode ? "Saving…" : (codeSaved ? "Saved ✓" : "Save")) {
+                                saveParentCode()
                             }
-                        Button(codeSaved ? "Saved ✓" : "Save") {
-                            model.parentCode = newCode
-                            newCode = ""
-                            codeSaved = true
+                            .disabled(newCode.count != 4 || savingCode)
                         }
-                        .disabled(newCode.count != 4)
+                    } else {
+                        Text("The grown-ups code is set on a grown-up's phone, and the same code opens this area on every phone in the family. Open this app on your own phone to change it.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
                     }
                 }
 

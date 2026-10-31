@@ -358,6 +358,15 @@ struct SetupView: View {
             }
         }
         if role == .kid, pin.count == 4 { model.parentCode = pin }
+        if familyCodeToApply != nil, pin.count == 4 {
+            Task { @MainActor in
+                // If this family already has a grown-ups code, every phone
+                // keeps using that one; otherwise this becomes it.
+                if await store.fetchFamilyPasscode() == nil {
+                    await store.setFamilyPasscode(pin)
+                }
+            }
+        }
         Sfx.bump()
         withAnimation(.spring(response: 0.4)) { model.role = role }
     }
@@ -733,6 +742,7 @@ struct ParentHomeView: View {
                         // phone in the family can see and call it by name.
                         await familyStore.publishStatus()
                         kidStatuses = await familyStore.fetchStatuses()
+                        await familyStore.fetchFamilyPasscode()
                     }
                 }
                 try? await Task.sleep(for: .seconds(12))

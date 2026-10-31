@@ -113,7 +113,10 @@ final class MusicEngine {
     private static let sampleRate: Double = 44100
 
     private init() {
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+        // The instruments play over whatever else is on, like a real toy.
+        try? AVAudioSession.sharedInstance().setCategory(
+            .playback, mode: .default, options: [.mixWithOthers]
+        )
         try? AVAudioSession.sharedInstance().setActive(true)
 
         for _ in 0..<8 {

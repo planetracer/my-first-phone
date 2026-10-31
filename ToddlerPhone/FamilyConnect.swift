@@ -496,6 +496,59 @@ final class FamilyStore: ObservableObject {
         }
     }
 
+    // MARK: The grown-ups code, shared by the whole family
+
+    /// The code every phone in this family unlocks the grown-ups area with.
+    /// Kept on disk so it still works with no internet.
+    @Published var familyPasscode: String? = UserDefaults.standard.string(forKey: "familyPasscode") {
+        didSet { UserDefaults.standard.set(familyPasscode, forKey: "familyPasscode") }
+    }
+
+    private var settingsRecordID: CKRecord.ID? {
+        guard let code else { return nil }
+        return CKRecord.ID(recordName: "settings-\(code)")
+    }
+
+    /// Reads the family's grown-ups code. Returns nil when the family has
+    /// never set one.
+    @discardableResult
+    func fetchFamilyPasscode() async -> String? {
+        guard let recordID = settingsRecordID, let db = try? database else { return nil }
+        guard let record = try? await db.record(for: recordID),
+              let stored = record["parentCode"] as? String,
+              stored.count == 4 else { return nil }
+        if familyPasscode != stored { familyPasscode = stored }
+        return stored
+    }
+
+    /// Saves a new grown-ups code for every phone in the family. Only the
+    /// grown-ups area and first time setup call this; the kid phone's own
+    /// settings screen shows the code as read only.
+    @discardableResult
+    func setFamilyPasscode(_ newCode: String) async -> Bool {
+        let trimmed = newCode.filter(\.isNumber)
+        guard trimmed.count == 4, let recordID = settingsRecordID, code != nil else { return false }
+        do {
+            let db = try database
+            let record: CKRecord
+            if let existing = try? await db.record(for: recordID) {
+                record = existing
+            } else {
+                record = CKRecord(recordType: "FamilySettings", recordID: recordID)
+            }
+            record["code"] = code
+            record["parentCode"] = trimmed
+            record["updatedAt"] = Date.now
+            record["updatedBy"] = displayName
+            try await db.save(record)
+            familyPasscode = trimmed
+            return true
+        } catch {
+            lastError = Self.friendly(error)
+            return false
+        }
+    }
+
     // MARK: Who is in the family
 
     /// Names a grown-up has removed, with the time they were removed.
@@ -568,6 +621,8 @@ final class FamilyStore: ObservableObject {
         messages = []
         members = []
         readReceipts = [:]
+        // Back to whatever code this phone had on its own.
+        familyPasscode = nil
         lastError = reason
     }
 
@@ -759,7 +814,7 @@ final class VoiceRecorder {
         recorder?.stop()
         recorder = nil
         let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playback, mode: .default)
+        try? session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
         defer { fileURL = nil }
         return fileURL
     }
@@ -844,7 +899,6 @@ struct FamilyChatView: View {
                     }
                     if let caller = store.incomingRing() {
                         ringingFrom = caller
-                        Sfx.ring()
                     }
                 }
                 try? await Task.sleep(for: .seconds(8))
@@ -1154,6 +1208,7 @@ struct FamilyChatView: View {
                 Spacer()
                 Button {
                     Sfx.tap()
+                    Ringer.shared.stop()
                     ringingFrom = nil
                 } label: {
                     Text("OK!")
@@ -1166,6 +1221,7 @@ struct FamilyChatView: View {
                 .padding(.bottom, 50)
             }
         }
-        .onAppear { Sfx.ring() }
+        .onAppear { Ringer.shared.start(incoming: true) }
+        .onDisappear { Ringer.shared.stop() }
     }
 }
