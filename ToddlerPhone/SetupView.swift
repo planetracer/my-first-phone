@@ -25,8 +25,12 @@ struct SetupView: View {
             Palette.background.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                progressDots
-                    .padding(.top, 20)
+                // Back, the progress dots and next all on one line.
+                ZStack {
+                    progressDots
+                    stepNav
+                }
+                .padding(.top, 16)
 
                 Spacer()
 
@@ -47,6 +51,67 @@ struct SetupView: View {
             .padding(.horizontal, 24)
         }
         .animation(.spring(response: 0.35), value: step)
+    }
+
+    /// Back and next, so a grown-up can go over a page again instead of being
+    /// pushed one way through the wizard.
+    private var stepNav: some View {
+        HStack {
+            if step != .welcome {
+                navButton("Back", icon: "chevron.left", leading: true) { goBack() }
+            }
+            Spacer(minLength: 0)
+            if step != .done, canAdvance {
+                navButton("Next", icon: "chevron.right", leading: false) { goForward() }
+            }
+        }
+        .frame(height: 44)
+        .animation(.easeOut(duration: 0.2), value: step)
+    }
+
+    private func navButton(
+        _ label: String,
+        icon: String,
+        leading: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            Sfx.tap()
+            action()
+        } label: {
+            HStack(spacing: 6) {
+                if leading { Image(systemName: icon) }
+                Text(label)
+                if !leading { Image(systemName: icon) }
+            }
+            .font(.rounded(16, weight: .semibold))
+            .foregroundStyle(Palette.inkSoft)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .card(cornerRadius: 16)
+        }
+        .buttonStyle(BouncyButtonStyle())
+    }
+
+    /// Whether this page has what it needs to move on.
+    private var canAdvance: Bool {
+        switch step {
+        case .name: return !name.trimmingCharacters(in: .whitespaces).isEmpty
+        case .pin: return pin.count == 4
+        default: return true
+        }
+    }
+
+    private func goForward() {
+        if let next = visibleSteps.first(where: { $0.rawValue > step.rawValue }) {
+            step = next
+        }
+    }
+
+    private func goBack() {
+        if let previous = visibleSteps.last(where: { $0.rawValue < step.rawValue }) {
+            step = previous
+        }
     }
 
     private var progressDots: some View {
@@ -274,7 +339,9 @@ struct SetupView: View {
     private var familyCodeToApply: String? {
         if let createdCode { return createdCode }
         let joined = joinCode.trimmingCharacters(in: .whitespaces).uppercased()
-        return joined.count == 6 ? joined : nil
+        // Family codes are 8 characters; older ones were 6. Anything in that
+        // range counts, which is the same rule the Join button uses.
+        return (6...8).contains(joined.count) ? joined : nil
     }
 
     private func finish() {
@@ -282,7 +349,13 @@ struct SetupView: View {
         store.displayName = name.trimmingCharacters(in: .whitespaces)
         if let code = familyCodeToApply {
             store.code = code
-            Task { await store.enableNotifications() }
+            Task {
+                // Say hello at once rather than waiting for the next beacon,
+                // so this phone turns up on the others right away.
+                await store.publishStatus()
+                _ = await store.fetchStatuses()
+                await store.enableNotifications()
+            }
         }
         if role == .kid, pin.count == 4 { model.parentCode = pin }
         Sfx.bump()
