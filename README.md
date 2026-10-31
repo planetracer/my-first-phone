@@ -24,7 +24,7 @@ Family Connect runs on Apple's iCloud (CloudKit). If messages or calls don't go 
 2. In Xcode: select the ToddlerPhone **target → Signing & Capabilities → Team** → pick your team. The entitlements file is already in the project; Xcode will register the container `iCloud.com.family.ToddlerPhone` automatically.
 3. Install on both phones (both signed into **iCloud** in Settings).
 4. Send one message from each phone — this auto-creates the CloudKit record types in the *development* environment.
-5. **Indexes (the usual gotcha)**: if sending works but nothing arrives, go to [icloud.developer.apple.com](https://icloud.developer.apple.com) → your container → Development → **Indexes**, and add a **Queryable** index on the `code` field for each record type (FamilyMessage, CallSignal, FamilyStatus, FamilyReceipt, FamilyPing). The in-app test tells you if this is the problem.
+5. **Indexes (the usual gotcha)**: if sending works but nothing arrives, go to [icloud.developer.apple.com](https://icloud.developer.apple.com) → your container → Development → **Indexes**, and add a **Queryable** index on the `code` field for each record type (FamilyMessage, CallSignal, FamilyStatus, FamilyReceipt, FamilyVideo, FamilyPing). The in-app test tells you if this is the problem.
 6. Run **Test the connection** on BOTH phones until both show ✅.
 7. Before sharing the app beyond your own devices, deploy the schema to Production in the CloudKit Console.
 

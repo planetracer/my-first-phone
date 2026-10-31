@@ -365,6 +365,7 @@ struct ParentHomeView: View {
     @State private var showSettings = false
     @State private var showFamilyChat = false
     @State private var showPhotoWall = false
+    @State private var showFamilyVideos = false
     @State private var showFamilyMembers = false
     @State private var kidStatuses: [FamilyStore.DeviceStatus] = []
     @State private var testResult: String?
@@ -523,6 +524,31 @@ struct ParentHomeView: View {
                             }
                             .buttonStyle(BouncyButtonStyle())
 
+                            Button {
+                                Sfx.tap()
+                                showFamilyVideos = true
+                            } label: {
+                                HStack(spacing: 12) {
+                                    SymbolAvatar(symbol: "film.stack.fill", color: Palette.purple, size: 52)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Family videos")
+                                            .font(.rounded(18, weight: .semibold))
+                                            .foregroundStyle(Palette.ink)
+                                        Text("Send a video to the TV app on your kid's phone")
+                                            .font(.rounded(13, weight: .medium))
+                                            .foregroundStyle(Palette.inkSoft)
+                                            .multilineTextAlignment(.leading)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 15, weight: .bold))
+                                        .foregroundStyle(Palette.inkSoft.opacity(0.6))
+                                }
+                                .padding(12)
+                                .card(cornerRadius: 24)
+                            }
+                            .buttonStyle(BouncyButtonStyle())
+
                             // Quick sends — one tap, straight into the family chat.
                             HStack(spacing: 8) {
                                 quickSend("heart.fill", "❤️", Palette.pink)
@@ -610,6 +636,9 @@ struct ParentHomeView: View {
         }
         .fullScreenCover(isPresented: $showPhotoWall) {
             FamilyPhotoWallView()
+        }
+        .fullScreenCover(isPresented: $showFamilyVideos) {
+            FamilyVideosView()
         }
         .sheet(isPresented: $showFamilyMembers) {
             FamilyMembersView()

@@ -119,7 +119,7 @@ final class FamilyStore: ObservableObject {
             let query = CKQuery(recordType: "FamilyPing", predicate: NSPredicate(format: "code == %@", code))
             _ = try await db.records(matching: query, inZoneWith: nil, desiredKeys: nil, resultsLimit: 1)
         } catch {
-            return "⚠️ Saving works but searching doesn't, which means CloudKit needs indexes. Go to icloud.developer.apple.com → your container → Development → Indexes, and for EACH record type (FamilyMessage, CallSignal, FamilyStatus, FamilyReceipt, FamilyPing) add a QUERYABLE index on the 'code' field. Then run this test again.\n(\(error.localizedDescription))"
+            return "⚠️ Saving works but searching doesn't, which means CloudKit needs indexes. Go to icloud.developer.apple.com → your container → Development → Indexes, and for EACH record type (FamilyMessage, CallSignal, FamilyStatus, FamilyReceipt, FamilyVideo, FamilyPing) add a QUERYABLE index on the 'code' field. Then run this test again.\n(\(error.localizedDescription))"
         }
 
         return "✅ iCloud is working! Messages and calls can flow. Remember: the other phone must be online, and calls ring while its app is open or when the call notification is tapped. Run this same test on the other phone too."
@@ -245,6 +245,116 @@ final class FamilyStore: ObservableObject {
         } catch {
             lastError = Self.friendly(error)
             return []
+        }
+    }
+
+    // MARK: Family videos (a grown-up shares a video with every kid phone)
+
+    struct FamilyVideo: Identifiable {
+        let id: String
+        let title: String
+        let sender: String
+        let sentAt: Date
+        /// Carried along so a cached copy on a kid phone keeps a file type
+        /// AVPlayer recognises — CloudKit's own asset files have no extension.
+        var fileExtension: String = "mov"
+    }
+
+    /// Sends one video to the whole family. `onProgress` reports 0…1 as the
+    /// file goes up, because videos are big enough that a spinner alone would
+    /// look like nothing is happening.
+    func uploadFamilyVideo(
+        fileURL: URL,
+        title: String,
+        onProgress: @escaping (Double) -> Void
+    ) async -> Bool {
+        guard let code else { return false }
+        let record = CKRecord(recordType: "FamilyVideo")
+        record["code"] = code
+        record["title"] = title
+        record["sender"] = displayName.isEmpty ? "Someone" : displayName
+        record["video"] = CKAsset(fileURL: fileURL)
+        record["sentAt"] = Date.now
+        record["fileExtension"] = fileURL.pathExtension.isEmpty ? "mov" : fileURL.pathExtension.lowercased()
+
+        do {
+            let db = try database
+            // CKModifyRecordsOperation instead of save() purely for the
+            // progress callback the parent screen shows.
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                let operation = CKModifyRecordsOperation(recordsToSave: [record])
+                operation.qualityOfService = .userInitiated
+                operation.perRecordProgressBlock = { _, fraction in
+                    Task { @MainActor in onProgress(fraction) }
+                }
+                operation.modifyRecordsResultBlock = { result in
+                    continuation.resume(with: result)
+                }
+                db.add(operation)
+            }
+            lastError = nil
+            return true
+        } catch {
+            lastError = Self.friendly(error)
+            return false
+        }
+    }
+
+    /// Every video shared with the family, newest first. The asset is left out
+    /// of the query so listing stays cheap; the file comes down only when
+    /// someone plays it.
+    func fetchFamilyVideos() async -> [FamilyVideo] {
+        guard let code else { return [] }
+        do {
+            let query = CKQuery(
+                recordType: "FamilyVideo",
+                predicate: NSPredicate(format: "code == %@", code)
+            )
+            let (results, _) = try await database.records(
+                matching: query,
+                inZoneWith: nil,
+                desiredKeys: ["title", "sender", "sentAt", "fileExtension"],
+                resultsLimit: 50
+            )
+            var videos: [FamilyVideo] = []
+            for (recordID, result) in results {
+                if case .success(let record) = result {
+                    videos.append(FamilyVideo(
+                        id: recordID.recordName,
+                        title: record["title"] as? String ?? "Family video",
+                        sender: record["sender"] as? String ?? "Someone",
+                        sentAt: record["sentAt"] as? Date ?? record.creationDate ?? .distantPast,
+                        fileExtension: record["fileExtension"] as? String ?? "mov"
+                    ))
+                }
+            }
+            lastError = nil
+            return videos.sorted { $0.sentAt > $1.sentAt }
+        } catch {
+            lastError = Self.friendly(error)
+            return []
+        }
+    }
+
+    /// Pulls the actual file down. CloudKit hands back its own temporary copy,
+    /// so callers that want to keep it should copy it somewhere of their own.
+    func downloadFamilyVideo(id: String) async -> URL? {
+        do {
+            let record = try await database.record(for: CKRecord.ID(recordName: id))
+            return (record["video"] as? CKAsset)?.fileURL
+        } catch {
+            lastError = Self.friendly(error)
+            return nil
+        }
+    }
+
+    /// Takes a video away from every phone in the family.
+    func deleteFamilyVideo(id: String) async {
+        do {
+            try await database.deleteRecord(withID: CKRecord.ID(recordName: id))
+            lastError = nil
+        } catch {
+            lastError = Self.friendly(error)
         }
     }
 

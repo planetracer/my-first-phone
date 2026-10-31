@@ -42,6 +42,79 @@ final class VideoLibrary: ObservableObject {
     }
 }
 
+// MARK: - Videos a grown-up sent to the family
+
+/// Keeps the family video list and the downloaded files. The kid phone only
+/// ever taps play, so each file is copied into the caches directory the first
+/// time it is opened and reused after that instead of coming down again.
+@MainActor
+final class FamilyVideoCache: ObservableObject {
+    static let shared = FamilyVideoCache()
+
+    @Published var videos: [FamilyStore.FamilyVideo] = []
+    /// Videos being fetched right now, so their tile can show a spinner.
+    @Published var downloading: Set<String> = []
+
+    private static var cacheDir: URL {
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("FamilyVideos", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private static func cacheURL(for video: FamilyStore.FamilyVideo) -> URL {
+        cacheDir.appendingPathComponent("\(video.id).\(video.fileExtension)")
+    }
+
+    func refresh() async {
+        guard FamilyStore.shared.isConnected else {
+            videos = []
+            return
+        }
+        let fetched = await FamilyStore.shared.fetchFamilyVideos()
+        // A query that couldn't reach iCloud also comes back empty, so an
+        // offline kid phone keeps the list and files it already had.
+        guard !fetched.isEmpty || FamilyStore.shared.lastError == nil else { return }
+        videos = fetched
+        pruneDeleted()
+    }
+
+    func cachedFile(for video: FamilyStore.FamilyVideo) -> URL? {
+        let url = Self.cacheURL(for: video)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    /// The playable file: the cached copy when there is one, a download otherwise.
+    func file(for video: FamilyStore.FamilyVideo) async -> URL? {
+        if let cached = cachedFile(for: video) { return cached }
+        downloading.insert(video.id)
+        defer { downloading.remove(video.id) }
+
+        guard let downloaded = await FamilyStore.shared.downloadFamilyVideo(id: video.id) else { return nil }
+        let destination = Self.cacheURL(for: video)
+        try? FileManager.default.removeItem(at: destination)
+        do {
+            try FileManager.default.copyItem(at: downloaded, to: destination)
+            return destination
+        } catch {
+            // Playing straight from CloudKit's own copy still works; it just
+            // won't survive to the next time TV is opened.
+            return downloaded
+        }
+    }
+
+    /// Drops files for videos a grown-up has taken down.
+    private func pruneDeleted() {
+        let keep = Set(videos.map(\.id))
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: Self.cacheDir, includingPropertiesForKeys: nil
+        )) ?? []
+        for file in files where !keep.contains(file.deletingPathExtension().lastPathComponent) {
+            try? FileManager.default.removeItem(at: file)
+        }
+    }
+}
+
 // MARK: - Streamed shows (public domain and open license, from the Internet Archive)
 
 /// A category row in the library. Order here is the order on screen.
@@ -260,6 +333,7 @@ enum ChannelKind: String, CaseIterable, Identifiable {
 
 struct TVView: View {
     @StateObject private var library = VideoLibrary.shared
+    @StateObject private var familyVideos = FamilyVideoCache.shared
     @State private var selection: TVSelection?
     @AppStorage("classicsEnabled") private var classicsEnabled = true
 
@@ -303,6 +377,12 @@ struct TVView: View {
                             }
                         }
 
+                        // Only there when a grown-up has actually sent
+                        // something, so an empty family leaves no gap.
+                        if !familyVideos.videos.isEmpty {
+                            familyRow
+                        }
+
                         myShowsRow
                     }
                     .padding(.top, 4)
@@ -311,6 +391,7 @@ struct TVView: View {
             }
         }
         .onAppear { library.reload() }
+        .task { await familyVideos.refresh() }
         .fullScreenCover(item: $selection) { selection in
             switch selection {
             case .channel(let kind): ChannelPlayerView(kind: kind)
@@ -349,6 +430,27 @@ struct TVView: View {
                         ShowPosterCard(show: show, width: Self.cardWidth)
                     }
                     .buttonStyle(BouncyButtonStyle())
+                }
+            }
+        }
+    }
+
+    private var familyRow: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionTitle("From your family")
+            horizontalRow {
+                ForEach(familyVideos.videos) { video in
+                    Button {
+                        play(video)
+                    } label: {
+                        FamilyVideoTile(
+                            video: video,
+                            width: Self.cardWidth,
+                            isLoading: familyVideos.downloading.contains(video.id)
+                        )
+                    }
+                    .buttonStyle(BouncyButtonStyle())
+                    .disabled(familyVideos.downloading.contains(video.id))
                 }
             }
         }
@@ -396,6 +498,17 @@ struct TVView: View {
         Sfx.tap()
         if let url = show.streamURL {
             selection = .video(url)
+        }
+    }
+
+    /// The first tap on a family video may have to fetch it, so the tile spins
+    /// and the player opens once the file is here.
+    private func play(_ video: FamilyStore.FamilyVideo) {
+        Sfx.tap()
+        Task {
+            if let url = await familyVideos.file(for: video) {
+                selection = .video(url)
+            }
         }
     }
 
@@ -596,6 +709,66 @@ struct VideoThumbnailTile: View {
                 .frame(width: width, alignment: .leading)
         }
         .task(id: url) { image = await VideoLibrary.thumbnail(for: url) }
+    }
+}
+
+/// A video a grown-up sent to the family. Its frame can only be grabbed once
+/// the file is cached, so until then it wears the film placeholder.
+struct FamilyVideoTile: View {
+    let video: FamilyStore.FamilyVideo
+    var width: CGFloat = 208
+    var isLoading = false
+    @State private var image: UIImage?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ZStack {
+                Palette.purple.opacity(0.16)
+                if let image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } else {
+                    Image(systemName: "film.fill")
+                        .font(.system(size: 28))
+                        .foregroundStyle(Palette.purple)
+                }
+
+                if isLoading {
+                    Color.black.opacity(0.3)
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .tint(.white)
+                        .scaleEffect(1.4)
+                } else {
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 40))
+                        .foregroundStyle(.white.opacity(0.92))
+                        .shadow(color: .black.opacity(0.3), radius: 4)
+                }
+            }
+            .frame(width: width, height: width * 9 / 16)
+            .clipShape(RoundedRectangle(cornerRadius: 22))
+            .shadow(color: .black.opacity(0.1), radius: 8, y: 4)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(video.title)
+                    .font(.rounded(15, weight: .semibold))
+                    .foregroundStyle(Palette.ink)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                Text("From \(video.sender)")
+                    .font(.rounded(12, weight: .semibold))
+                    .foregroundStyle(Palette.inkSoft)
+            }
+            .frame(width: width, alignment: .leading)
+        }
+        // Keyed on the download too, so the frame appears as soon as the file
+        // has landed rather than waiting for the next visit to TV.
+        .task(id: "\(video.id)-\(isLoading)") {
+            guard let cached = FamilyVideoCache.shared.cachedFile(for: video) else { return }
+            image = await VideoLibrary.thumbnail(for: cached)
+        }
     }
 }
 
