@@ -139,6 +139,7 @@ struct ParentGateView: View {
     @State private var guidedAccessOn = UIAccessibility.isGuidedAccessEnabled
     @StateObject private var familyStore = FamilyStore.shared
     @State private var joinCode = ""
+    @State private var showFamilyMembers = false
 
     private var roleBinding: Binding<PhoneRole> {
         Binding(
@@ -179,10 +180,22 @@ struct ParentGateView: View {
                         .font(.callout)
                         .foregroundStyle(.secondary)
 
-                    TextField("Name shown in chat (e.g. Mom, Leo)", text: Binding(
-                        get: { familyStore.displayName },
-                        set: { familyStore.displayName = $0 }
-                    ))
+                    HStack {
+                        Text("This phone is called")
+                        Spacer()
+                        Text(familyStore.displayName.isEmpty ? "Not set" : familyStore.displayName)
+                            .foregroundStyle(familyStore.displayName.isEmpty ? .secondary : .primary)
+                            .bold()
+                    }
+
+                    Button {
+                        showFamilyMembers = true
+                    } label: {
+                        Label(
+                            familyStore.isConnected ? "Family members, names and invites" : "Set up the family",
+                            systemImage: "person.2.badge.gearshape.fill"
+                        )
+                    }
 
                     if let code = familyStore.code {
                         HStack {
@@ -351,6 +364,9 @@ struct ParentGateView: View {
                     }
                     .disabled(didReset)
                 }
+            }
+            .sheet(isPresented: $showFamilyMembers) {
+                FamilyMembersView()
             }
             .navigationTitle("Grown-ups")
             .onChange(of: model.role) { _ in

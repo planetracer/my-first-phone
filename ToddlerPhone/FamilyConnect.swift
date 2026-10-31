@@ -25,7 +25,19 @@ final class FamilyStore: ObservableObject {
     static let shared = FamilyStore()
 
     @Published var code: String? = UserDefaults.standard.string(forKey: "familyCode") {
-        didSet { UserDefaults.standard.set(code, forKey: "familyCode") }
+        didSet {
+            UserDefaults.standard.set(code, forKey: "familyCode")
+            // Joining (or rejoining) starts the clock again, so an older
+            // "removed" marker from a previous membership is ignored.
+            if code != oldValue, code != nil {
+                UserDefaults.standard.set(Date.now, forKey: "familyJoinedAt")
+            }
+        }
+    }
+
+    /// When this phone last joined the family.
+    var joinedAt: Date {
+        UserDefaults.standard.object(forKey: "familyJoinedAt") as? Date ?? .distantPast
     }
     @Published var displayName: String = UserDefaults.standard.string(forKey: "familyName") ?? "" {
         didSet { UserDefaults.standard.set(displayName, forKey: "familyName") }
@@ -296,7 +308,17 @@ final class FamilyStore: ObservableObject {
         let name: String
         let battery: Int
         let updatedAt: Date
+        /// "kid" or "parent" — which phone this is.
+        var role: String = "kid"
         var id: String { name }
+
+        var isKid: Bool { role != "parent" }
+        var title: String { isKid ? "\(name)'s phone" : name }
+    }
+
+    /// What this phone calls itself when it announces its presence.
+    private var myRole: String {
+        UserDefaults.standard.string(forKey: "phoneRole") ?? "kid"
     }
 
 
@@ -315,6 +337,7 @@ final class FamilyStore: ObservableObject {
             let level = UIDevice.current.batteryLevel
             record["code"] = code
             record["name"] = displayName
+            record["role"] = myRole
             record["battery"] = level < 0 ? -1 : Int(level * 100)
             record["updatedAt"] = Date.now
             try await db.save(record)
@@ -339,16 +362,103 @@ final class FamilyStore: ObservableObject {
                     statuses.append(DeviceStatus(
                         name: record["name"] as? String ?? "Family phone",
                         battery: record["battery"] as? Int ?? -1,
-                        updatedAt: record["updatedAt"] as? Date ?? .distantPast
+                        updatedAt: record["updatedAt"] as? Date ?? .distantPast,
+                        role: record["role"] as? String ?? "kid"
                     ))
                 }
             }
-            let others = statuses.filter { $0.name != displayName }
+
+            // Anyone a grown-up removed drops off every phone's list.
+            let removals = await fetchRemovals()
+            if let removedAt = removals[displayName], removedAt > joinedAt {
+                leaveFamily(reason: "This phone was removed from the family. Ask a grown-up for the family code to join again.")
+                return []
+            }
+            let others = statuses.filter { status in
+                guard status.name != displayName else { return false }
+                if let removedAt = removals[status.name], removedAt >= status.updatedAt { return false }
+                return true
+            }
             members = others.sorted { $0.name < $1.name }
             return members
         } catch {
             return []
         }
+    }
+
+    // MARK: Who is in the family
+
+    /// Names a grown-up has removed, with the time they were removed.
+    func fetchRemovals() async -> [String: Date] {
+        guard let code else { return [:] }
+        do {
+            let query = CKQuery(
+                recordType: "FamilyRemoved",
+                predicate: NSPredicate(format: "code == %@", code)
+            )
+            let (results, _) = try await database.records(
+                matching: query, inZoneWith: nil, desiredKeys: nil, resultsLimit: 50
+            )
+            var removals: [String: Date] = [:]
+            for (_, result) in results {
+                if case .success(let record) = result,
+                   let name = record["name"] as? String {
+                    let at = record["removedAt"] as? Date ?? .distantPast
+                    removals[name] = max(removals[name] ?? .distantPast, at)
+                }
+            }
+            return removals
+        } catch {
+            return [:]
+        }
+    }
+
+    /// Takes one phone out of the family. Its own copy of the app notices and
+    /// leaves, and it stops showing up as a contact on the other phones.
+    func removeMember(_ name: String) async {
+        guard let code, name != displayName else { return }
+        do {
+            let db = try database
+            try? await db.deleteRecord(withID: CKRecord.ID(recordName: "status-\(code)-\(name)"))
+
+            let recordID = CKRecord.ID(recordName: "removed-\(code)-\(name)")
+            let record: CKRecord
+            if let existing = try? await db.record(for: recordID) {
+                record = existing
+            } else {
+                record = CKRecord(recordType: "FamilyRemoved", recordID: recordID)
+            }
+            record["code"] = code
+            record["name"] = name
+            record["removedAt"] = Date.now
+            try await db.save(record)
+            members.removeAll { $0.name == name }
+        } catch {
+            lastError = Self.friendly(error)
+        }
+    }
+
+    /// Changes the name this phone is known by everywhere.
+    func rename(to newName: String) async {
+        let trimmed = newName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, trimmed != displayName else { return }
+        let previous = displayName
+        if let code, !previous.isEmpty, let db = try? database {
+            // Drop the old beacon so the old name stops appearing as a contact.
+            try? await db.deleteRecord(withID: CKRecord.ID(recordName: "status-\(code)-\(previous)"))
+        }
+        displayName = trimmed
+        await publishStatus()
+        _ = await fetchStatuses()
+    }
+
+    /// Clears everything tying this phone to a family.
+    func leaveFamily(reason: String? = nil) {
+        code = nil
+        messages = []
+        members = []
+        readReceipts = [:]
+        lastError = reason
     }
 
     /// Registers CloudKit push subscriptions so messages and calls arrive

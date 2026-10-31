@@ -7,6 +7,7 @@ struct DoodleView: View {
     @State private var selectedColor: Color = Palette.red
     @State private var canvasSize: CGSize = .zero
     @State private var sentConfirmation = false
+    @State private var sending = false
 
     private let palette: [Color] = [
         Palette.red, Palette.orange, Palette.yellow, Palette.green,
@@ -116,15 +117,30 @@ struct DoodleView: View {
                     Button {
                         sendToFamily()
                     } label: {
-                        Label(sentConfirmation ? "Sent!" : "Send", systemImage: sentConfirmation ? "checkmark" : "paperplane.fill")
-                            .font(.rounded(15, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 18)
-                            .padding(.vertical, 12)
-                            .background(sentConfirmation ? Palette.green : Palette.blue, in: Capsule())
+                        HStack(spacing: 8) {
+                            // Sending goes over the internet, so the button
+                            // says so instead of looking like nothing happened.
+                            if sending {
+                                ProgressView()
+                                    .progressViewStyle(.circular)
+                                    .tint(.white)
+                                Text("Sending…")
+                            } else {
+                                Image(systemName: sentConfirmation ? "checkmark" : "paperplane.fill")
+                                Text(sentConfirmation ? "Sent!" : "Send")
+                            }
+                        }
+                        .font(.rounded(15, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 12)
+                        .background(
+                            sentConfirmation ? Palette.green : (sending ? Palette.blue.opacity(0.75) : Palette.blue),
+                            in: Capsule()
+                        )
                     }
                     .buttonStyle(BouncyButtonStyle())
-                    .disabled(strokes.isEmpty || sentConfirmation)
+                    .disabled(strokes.isEmpty || sending || sentConfirmation)
                 }
             }
         }
@@ -133,8 +149,9 @@ struct DoodleView: View {
 
     /// Renders the drawing to an image and sends it to the family chat.
     private func sendToFamily() {
-        guard !strokes.isEmpty, canvasSize != .zero else { return }
+        guard !strokes.isEmpty, canvasSize != .zero, !sending, !sentConfirmation else { return }
         Sfx.bump()
+        sending = true
 
         let renderer = UIGraphicsImageRenderer(size: canvasSize)
         let image = renderer.image { context in
@@ -158,13 +175,17 @@ struct DoodleView: View {
             }
         }
 
-        guard let data = image.jpegData(compressionQuality: 0.8) else { return }
+        guard let data = image.jpegData(compressionQuality: 0.8) else {
+            sending = false
+            return
+        }
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("doodle-\(UUID().uuidString).jpg")
         try? data.write(to: url)
 
-        Task {
+        Task { @MainActor in
             await FamilyStore.shared.sendPhoto(fileURL: url)
+            sending = false
             sentConfirmation = true
             Speaker.shared.say("Drawing sent to your family!")
             try? await Task.sleep(for: .seconds(2))

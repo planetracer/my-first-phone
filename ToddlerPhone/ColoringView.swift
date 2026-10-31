@@ -144,6 +144,73 @@ enum Art {
         return path
     }
 
+    /// Open straight line, for ink detail that is never filled.
+    static func seg(_ x0: CGFloat, _ y0: CGFloat, _ x1: CGFloat, _ y1: CGFloat, _ s: CGSize) -> Path {
+        var path = Path()
+        path.move(to: p(x0, y0, s))
+        path.addLine(to: p(x1, y1, s))
+        return path
+    }
+
+    /// Open curve that bows away from the straight line between its ends.
+    /// Positive `bow` bends down and right.
+    static func bowed(_ x0: CGFloat, _ y0: CGFloat, _ x1: CGFloat, _ y1: CGFloat,
+                      _ s: CGSize, bow: CGFloat) -> Path {
+        let mx = (x0 + x1) / 2
+        let my = (y0 + y1) / 2
+        let dx = x1 - x0
+        let dy = y1 - y0
+        let len = max(0.0001, sqrt(dx * dx + dy * dy))
+        var path = Path()
+        path.move(to: p(x0, y0, s))
+        path.addQuadCurve(
+            to: p(x1, y1, s),
+            control: p(mx - dy / len * bow * 2, my + dx / len * bow * 2, s)
+        )
+        return path
+    }
+
+    /// Open smooth line through a run of points, for whiskers, veins and seams.
+    static func curve(_ pts: [(CGFloat, CGFloat)], _ s: CGSize) -> Path {
+        var path = Path()
+        guard pts.count >= 2 else { return path }
+        let q = pts.map { p($0.0, $0.1, s) }
+        path.move(to: q[0])
+        if q.count == 2 {
+            path.addLine(to: q[1])
+            return path
+        }
+        for i in 0..<(q.count - 1) {
+            let a = i == 0 ? q[0] : q[i - 1]
+            let b = q[i]
+            let c = q[i + 1]
+            let d = i + 2 < q.count ? q[i + 2] : q[q.count - 1]
+            let c1 = CGPoint(x: b.x + (c.x - a.x) / 6, y: b.y + (c.y - a.y) / 6)
+            let c2 = CGPoint(x: c.x - (d.x - b.x) / 6, y: c.y - (d.y - b.y) / 6)
+            path.addCurve(to: c, control1: c1, control2: c2)
+        }
+        return path
+    }
+
+    /// Open arc, for smiles, gills and panel seams.
+    static func arcLine(_ cx: CGFloat, _ cy: CGFloat, _ r: CGFloat, _ s: CGSize,
+                        from: CGFloat, to: CGFloat, squash: CGFloat = 1) -> Path {
+        let k = min(s.width, s.height)
+        var local = Path()
+        local.addArc(center: .zero, radius: r * k,
+                     startAngle: .radians(Double(from)), endAngle: .radians(Double(to)),
+                     clockwise: false)
+        var t = CGAffineTransform.identity
+        t = t.translatedBy(x: cx * s.width, y: cy * s.height)
+        t = t.scaledBy(x: 1, y: squash)
+        return local.applying(t)
+    }
+
+    /// Small solid ink mark: a pupil, a nostril, a rivet.
+    static func dot(_ cx: CGFloat, _ cy: CGFloat, _ r: CGFloat, _ s: CGSize) -> Path {
+        oval(cx, cy, r, r, s)
+    }
+
     /// Slice of a squashed ring, used for the planet ring.
     static func ringArc(_ cx: CGFloat, _ cy: CGFloat, _ r: CGFloat, _ s: CGSize,
                         from: CGFloat, to: CGFloat, thickness: CGFloat,
@@ -173,12 +240,86 @@ struct ColorRegion: Identifiable {
 struct ColoringPage: Identifiable {
     let id: String
     let name: String
+    /// Areas a child can tap to fill in.
     let regions: [ColorRegion]
+    /// Line work drawn over the top of every fill: whiskers, seams, smiles.
+    /// These are never filled, so the picture reads as one drawing rather than
+    /// a pile of separate shapes.
+    let ink: [(CGSize) -> Path]
+    /// Small solid marks in the same ink: pupils, nostrils, rivets.
+    let marks: [(CGSize) -> Path]
 
-    init(id: String, name: String, shapes: [(CGSize) -> Path]) {
+    init(
+        id: String,
+        name: String,
+        shapes: [(CGSize) -> Path],
+        ink: [(CGSize) -> Path] = [],
+        marks: [(CGSize) -> Path] = []
+    ) {
         self.id = id
         self.name = name
         self.regions = shapes.enumerated().map { ColorRegion(id: $0.offset, build: $0.element) }
+        self.ink = ink
+        self.marks = marks
+    }
+}
+
+// MARK: - Drawing a page
+//
+// Areas are drawn back to front, each one filled and then outlined, so a shape
+// in front hides the lines of whatever is behind it the way a real drawing
+// does. The detail lines — whiskers, seams, smiles, pupils — go on afterwards,
+// over the whole picture, which is what stops it reading as a pile of
+// separate shapes.
+
+enum ColoringRender {
+    static let inkColor = Palette.ink.opacity(0.9)
+
+    /// Thinner lines on small details, bolder lines around the big shapes.
+    /// Capped so the outlines stay crayon-like on an iPad instead of turning
+    /// into fat black bands.
+    static func lineWidth(for bounds: CGRect, canvas: CGSize) -> CGFloat {
+        let side = max(1, min(canvas.width, canvas.height))
+        let base = min(side * 0.0082, 4.0)
+        let small = min(bounds.width, bounds.height) / side
+        if small < 0.055 { return max(0.5, base * 0.52) }
+        if small < 0.17 { return max(0.7, base * 0.72) }
+        return max(0.9, base)
+    }
+
+    static func strokeStyle(for path: Path, canvas: CGSize) -> StrokeStyle {
+        StrokeStyle(
+            lineWidth: lineWidth(for: path.boundingRect, canvas: canvas),
+            lineCap: .round,
+            lineJoin: .round
+        )
+    }
+
+    /// Whiskers, seams and pupils, drawn over the finished picture.
+    static func drawDetails(_ page: ColoringPage, into context: inout GraphicsContext, size: CGSize) {
+        let side = max(1, min(size.width, size.height))
+        let detail = StrokeStyle(
+            lineWidth: max(0.5, min(side * 0.0055, 2.6)),
+            lineCap: .round,
+            lineJoin: .round
+        )
+        for build in page.ink {
+            context.stroke(build(size), with: .color(inkColor), style: detail)
+        }
+        for build in page.marks {
+            context.fill(build(size), with: .color(inkColor))
+        }
+    }
+
+    /// The whole picture, unfilled: every area outlined back to front, then the
+    /// details. Used for the little page thumbnails.
+    static func drawOutline(_ page: ColoringPage, into context: inout GraphicsContext, size: CGSize) {
+        for region in page.regions {
+            let path = region.build(size)
+            context.fill(path, with: .color(.white))
+            context.stroke(path, with: .color(inkColor), style: strokeStyle(for: path, canvas: size))
+        }
+        drawDetails(page, into: &context, size: size)
     }
 }
 
@@ -219,6 +360,24 @@ extension ColoringPage {
         { (s: CGSize) -> Path in Art.poly([(0.500, 0.330), (0.541, 0.281), (0.459, 0.281)], s) },
         { (s: CGSize) -> Path in Art.oval(0.425, 0.245, 0.045, 0.056, s) },
         { (s: CGSize) -> Path in Art.oval(0.575, 0.245, 0.045, 0.056, s) },
+    ], ink: [
+        // Whiskers, starting at the edge of the muzzle
+        { (s: CGSize) -> Path in Art.curve([(0.372, 0.330), (0.318, 0.312), (0.258, 0.300)], s) },
+        { (s: CGSize) -> Path in Art.curve([(0.366, 0.350), (0.308, 0.350), (0.246, 0.356)], s) },
+        { (s: CGSize) -> Path in Art.curve([(0.372, 0.370), (0.316, 0.388), (0.262, 0.406)], s) },
+        { (s: CGSize) -> Path in Art.curve([(0.628, 0.330), (0.682, 0.312), (0.742, 0.300)], s) },
+        { (s: CGSize) -> Path in Art.curve([(0.634, 0.350), (0.692, 0.350), (0.754, 0.356)], s) },
+        { (s: CGSize) -> Path in Art.curve([(0.628, 0.370), (0.684, 0.388), (0.738, 0.406)], s) },
+        // Nose down to the smile
+        { (s: CGSize) -> Path in Art.seg(0.500, 0.336, 0.500, 0.392, s) },
+        // Toes on the front paws
+        { (s: CGSize) -> Path in Art.seg(0.360, 0.876, 0.359, 0.900, s) },
+        { (s: CGSize) -> Path in Art.seg(0.396, 0.876, 0.397, 0.900, s) },
+        { (s: CGSize) -> Path in Art.seg(0.604, 0.876, 0.603, 0.900, s) },
+        { (s: CGSize) -> Path in Art.seg(0.640, 0.876, 0.641, 0.900, s) },
+    ], marks: [
+        { (s: CGSize) -> Path in Art.dot(0.428, 0.250, 0.019, s) },
+        { (s: CGSize) -> Path in Art.dot(0.572, 0.250, 0.019, s) },
     ])
 
     // Fire truck on the road, 28 regions.
@@ -252,6 +411,25 @@ extension ColoringPage {
         { (s: CGSize) -> Path in Art.oval(0.760, 0.755, 0.090, 0.090, s) },
         { (s: CGSize) -> Path in Art.oval(0.300, 0.755, 0.038, 0.038, s) },
         { (s: CGSize) -> Path in Art.oval(0.760, 0.755, 0.038, 0.038, s) },
+    ], ink: [
+        // Spokes in both wheels
+        { (s: CGSize) -> Path in Art.seg(0.332, 0.723, 0.360, 0.695, s) },
+        { (s: CGSize) -> Path in Art.seg(0.268, 0.723, 0.240, 0.695, s) },
+        { (s: CGSize) -> Path in Art.seg(0.332, 0.787, 0.360, 0.815, s) },
+        { (s: CGSize) -> Path in Art.seg(0.268, 0.787, 0.240, 0.815, s) },
+        { (s: CGSize) -> Path in Art.seg(0.792, 0.723, 0.820, 0.695, s) },
+        { (s: CGSize) -> Path in Art.seg(0.728, 0.723, 0.700, 0.695, s) },
+        { (s: CGSize) -> Path in Art.seg(0.792, 0.787, 0.820, 0.815, s) },
+        { (s: CGSize) -> Path in Art.seg(0.728, 0.787, 0.700, 0.815, s) },
+        // Panel seams along the body
+        { (s: CGSize) -> Path in Art.seg(0.520, 0.512, 0.520, 0.735, s) },
+        { (s: CGSize) -> Path in Art.seg(0.740, 0.512, 0.740, 0.735, s) },
+        // Hose wound on the reel
+        { (s: CGSize) -> Path in Art.oval(0.865, 0.610, 0.034, 0.034, s) },
+        { (s: CGSize) -> Path in Art.oval(0.865, 0.610, 0.018, 0.018, s) },
+    ], marks: [
+        { (s: CGSize) -> Path in Art.dot(0.172, 0.305, 0.010, s) },
+        { (s: CGSize) -> Path in Art.dot(0.258, 0.305, 0.010, s) },
     ])
 
     // Dinosaur in the sunshine, 24 regions.
@@ -295,6 +473,20 @@ extension ColoringPage {
         { (s: CGSize) -> Path in
             Art.poly([(0.862, 0.422), (0.932, 0.398), (0.930, 0.424), (0.868, 0.442)], s) },
         { (s: CGSize) -> Path in Art.oval(0.912, 0.352, 0.013, 0.013, s) },
+    ], ink: [
+        // Tummy crease and the line where the back leg joins the body
+        { (s: CGSize) -> Path in Art.curve([(0.355, 0.600), (0.395, 0.690), (0.470, 0.730)], s) },
+        { (s: CGSize) -> Path in Art.curve([(0.620, 0.590), (0.645, 0.665), (0.620, 0.730)], s) },
+        // Toes
+        { (s: CGSize) -> Path in Art.seg(0.395, 0.790, 0.392, 0.828, s) },
+        { (s: CGSize) -> Path in Art.seg(0.432, 0.792, 0.434, 0.828, s) },
+        { (s: CGSize) -> Path in Art.seg(0.555, 0.790, 0.552, 0.828, s) },
+        { (s: CGSize) -> Path in Art.seg(0.592, 0.792, 0.594, 0.828, s) },
+        // Smiling cheek and a crease on the neck
+        { (s: CGSize) -> Path in Art.bowed(0.790, 0.420, 0.845, 0.432, s, bow: 0.012) },
+        { (s: CGSize) -> Path in Art.curve([(0.690, 0.455), (0.722, 0.492), (0.735, 0.535)], s) },
+    ], marks: [
+        { (s: CGSize) -> Path in Art.dot(0.852, 0.368, 0.011, s) },
     ])
 
     // Rocket in space, 24 regions.
@@ -331,6 +523,20 @@ extension ColoringPage {
         { (s: CGSize) -> Path in Art.blob([(0.500, 0.070), (0.588, 0.285), (0.412, 0.285)], s, smooth: 0.6) },
         { (s: CGSize) -> Path in Art.oval(0.500, 0.400, 0.100, 0.100, s) },
         { (s: CGSize) -> Path in Art.oval(0.500, 0.400, 0.068, 0.068, s) },
+    ], ink: [
+        // Seams around the hull
+        { (s: CGSize) -> Path in Art.bowed(0.418, 0.295, 0.582, 0.295, s, bow: 0.018) },
+        { (s: CGSize) -> Path in Art.bowed(0.404, 0.628, 0.596, 0.628, s, bow: 0.018) },
+        // Fin creases
+        { (s: CGSize) -> Path in Art.seg(0.410, 0.545, 0.300, 0.700, s) },
+        { (s: CGSize) -> Path in Art.seg(0.590, 0.545, 0.700, 0.700, s) },
+        // Inside the flame
+        { (s: CGSize) -> Path in Art.curve([(0.470, 0.770), (0.500, 0.845), (0.530, 0.770)], s) },
+    ], marks: [
+        { (s: CGSize) -> Path in Art.dot(0.562, 0.462, 0.009, s) },
+        { (s: CGSize) -> Path in Art.dot(0.438, 0.462, 0.009, s) },
+        { (s: CGSize) -> Path in Art.dot(0.562, 0.338, 0.009, s) },
+        { (s: CGSize) -> Path in Art.dot(0.438, 0.338, 0.009, s) },
     ])
 
     // Fish tank scene, 27 regions.
@@ -375,6 +581,27 @@ extension ColoringPage {
         { (s: CGSize) -> Path in Art.oval(0.588, 0.152, 0.021, 0.021, s) },
         { (s: CGSize) -> Path in Art.oval(0.542, 0.104, 0.015, 0.015, s) },
         { (s: CGSize) -> Path in Art.oval(0.478, 0.268, 0.018, 0.018, s) },
+    ], ink: [
+        // Water line near the top of the tank
+        { (s: CGSize) -> Path in
+            Art.curve([(0.075, 0.170), (0.260, 0.148), (0.500, 0.170), (0.740, 0.148), (0.925, 0.170)], s) },
+        // Gill and fin rays on the big fish
+        { (s: CGSize) -> Path in Art.bowed(0.452, 0.352, 0.448, 0.506, s, bow: -0.030) },
+        { (s: CGSize) -> Path in Art.seg(0.238, 0.440, 0.168, 0.362, s) },
+        { (s: CGSize) -> Path in Art.seg(0.238, 0.442, 0.172, 0.442, s) },
+        { (s: CGSize) -> Path in Art.seg(0.238, 0.444, 0.168, 0.530, s) },
+        // Stones in the castle
+        { (s: CGSize) -> Path in Art.seg(0.606, 0.690, 0.864, 0.690, s) },
+        { (s: CGSize) -> Path in Art.seg(0.606, 0.755, 0.864, 0.755, s) },
+        { (s: CGSize) -> Path in Art.seg(0.672, 0.620, 0.672, 0.690, s) },
+        { (s: CGSize) -> Path in Art.seg(0.798, 0.620, 0.798, 0.690, s) },
+        { (s: CGSize) -> Path in Art.seg(0.638, 0.690, 0.638, 0.755, s) },
+        { (s: CGSize) -> Path in Art.seg(0.832, 0.690, 0.832, 0.755, s) },
+        // Veins up the seaweed
+        { (s: CGSize) -> Path in Art.curve([(0.100, 0.845), (0.092, 0.700), (0.086, 0.575)], s) },
+        { (s: CGSize) -> Path in Art.curve([(0.160, 0.845), (0.172, 0.730), (0.180, 0.632)], s) },
+    ], marks: [
+        { (s: CGSize) -> Path in Art.dot(0.496, 0.405, 0.012, s) },
     ])
 
     // Flower garden with a butterfly, 30 regions.
@@ -422,6 +649,32 @@ extension ColoringPage {
         { (s: CGSize) -> Path in
             Art.blob([(0.235, 0.330), (0.282, 0.380), (0.315, 0.356), (0.292, 0.330)], s) },
         { (s: CGSize) -> Path in Art.oval(0.230, 0.318, 0.019, 0.054, s) },
+    ], ink: [
+        // Butterfly antennae
+        { (s: CGSize) -> Path in Art.curve([(0.226, 0.286), (0.205, 0.244), (0.178, 0.228)], s) },
+        { (s: CGSize) -> Path in Art.curve([(0.236, 0.286), (0.258, 0.244), (0.285, 0.228)], s) },
+        // Veins down the middle of each leaf
+        { (s: CGSize) -> Path in Art.curve([(0.505, 0.662), (0.430, 0.660), (0.345, 0.655)], s) },
+        { (s: CGSize) -> Path in Art.curve([(0.152, 0.736), (0.225, 0.730), (0.290, 0.730), (0.290, 0.730)], s) },
+        { (s: CGSize) -> Path in Art.curve([(0.735, 0.782), (0.665, 0.765), (0.600, 0.760)], s) },
+        { (s: CGSize) -> Path in Art.curve([(0.768, 0.754), (0.838, 0.730), (0.898, 0.730)], s) },
+        // Creases down the big flower's petals
+        { (s: CGSize) -> Path in Art.seg(0.520, 0.282, 0.520, 0.212, s) },
+        { (s: CGSize) -> Path in Art.seg(0.572, 0.318, 0.638, 0.296, s) },
+        { (s: CGSize) -> Path in Art.seg(0.556, 0.382, 0.598, 0.440, s) },
+        { (s: CGSize) -> Path in Art.seg(0.484, 0.382, 0.442, 0.440, s) },
+        { (s: CGSize) -> Path in Art.seg(0.468, 0.318, 0.402, 0.296, s) },
+        // Tufts of grass along the ground
+        { (s: CGSize) -> Path in Art.curve([(0.300, 0.840), (0.318, 0.808), (0.336, 0.842)], s) },
+        { (s: CGSize) -> Path in Art.curve([(0.400, 0.862), (0.418, 0.828), (0.436, 0.864)], s) },
+        { (s: CGSize) -> Path in Art.curve([(0.580, 0.862), (0.598, 0.828), (0.616, 0.864)], s) },
+        { (s: CGSize) -> Path in Art.curve([(0.860, 0.844), (0.878, 0.810), (0.896, 0.846)], s) },
+    ], marks: [
+        { (s: CGSize) -> Path in Art.dot(0.520, 0.340, 0.012, s) },
+        { (s: CGSize) -> Path in Art.dot(0.180, 0.280, 0.013, s) },
+        { (s: CGSize) -> Path in Art.dot(0.280, 0.280, 0.013, s) },
+        { (s: CGSize) -> Path in Art.dot(0.172, 0.352, 0.009, s) },
+        { (s: CGSize) -> Path in Art.dot(0.288, 0.352, 0.009, s) },
     ])
 }
 
@@ -520,8 +773,9 @@ struct ColoringView: View {
             let side = max(1, min(geo.size.width, geo.size.height))
             let box = CGSize(width: side, height: side)
             ZStack {
+                // Back to front, so a shape in front hides what is behind it.
                 ForEach(page.regions) { region in
-                    RegionView(
+                    RegionFill(
                         path: region.build(box),
                         canvas: box,
                         color: store.fills[page.id]?[region.id],
@@ -530,6 +784,13 @@ struct ColoringView: View {
                         paint(region)
                     }
                 }
+
+                // The detail lines sit over the finished picture.
+                Canvas { context, size in
+                    ColoringRender.drawDetails(page, into: &context, size: size)
+                }
+                .frame(width: side, height: side)
+                .allowsHitTesting(false)
             }
             .id(page.id)
             .frame(width: side, height: side)
@@ -680,9 +941,10 @@ struct ColoringView: View {
     }
 }
 
-// MARK: - One fillable region
+// MARK: - One fillable area
 
-private struct RegionView: View {
+/// One fillable area: the fill, its own outline and the tap target.
+private struct RegionFill: View {
     let path: Path
     let canvas: CGSize
     let color: Color?
@@ -698,15 +960,15 @@ private struct RegionView: View {
         return ZStack {
             path.fill(color ?? Color.white)
             path.stroke(
-                Palette.ink.opacity(0.75),
-                style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round)
+                ColoringRender.inkColor,
+                style: ColoringRender.strokeStyle(for: path, canvas: canvas)
             )
         }
-        .contentShape(path)
-        .onTapGesture(perform: onTap)
-        .scaleEffect(bouncing ? 1.07 : 1, anchor: anchor)
-        .animation(.spring(response: 0.24, dampingFraction: 0.45), value: bouncing)
-        .animation(.easeOut(duration: 0.18), value: color)
+            .contentShape(path)
+            .onTapGesture(perform: onTap)
+            .scaleEffect(bouncing ? 1.05 : 1, anchor: anchor)
+            .animation(.spring(response: 0.24, dampingFraction: 0.45), value: bouncing)
+            .animation(.easeOut(duration: 0.18), value: color)
     }
 }
 
@@ -718,11 +980,7 @@ private struct PageThumb: View {
 
     var body: some View {
         Canvas { context, size in
-            for region in page.regions {
-                let path = region.build(size)
-                context.fill(path, with: .color(.white))
-                context.stroke(path, with: .color(Palette.ink.opacity(0.75)), lineWidth: 0.9)
-            }
+            ColoringRender.drawOutline(page, into: &context, size: size)
         }
         .frame(width: 58, height: 58)
         .padding(6)

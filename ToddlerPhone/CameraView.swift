@@ -452,6 +452,7 @@ struct KidGalleryView: View {
     @StateObject private var familyStore = FamilyStore.shared
     @State private var selected: URL?
     @State private var sent = false
+    @State private var sending = false
 
     var body: some View {
         ZStack {
@@ -520,6 +521,7 @@ struct KidGalleryView: View {
                         Sfx.tap()
                         selected = nil
                         sent = false
+                        sending = false
                     } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 20, weight: .heavy))
@@ -548,22 +550,38 @@ struct KidGalleryView: View {
                 HStack(spacing: 24) {
                     if familyStore.isConnected {
                         Button {
+                            guard !sending, !sent else { return }
                             Sfx.bump()
-                            sent = true
-                            Task {
+                            sending = true
+                            Task { @MainActor in
                                 await FamilyStore.shared.sendPhoto(fileURL: url)
+                                sending = false
+                                sent = true
                                 Speaker.shared.say("Photo sent to your family!")
                             }
                         } label: {
-                            Label(sent ? "Sent!" : "Send to family", systemImage: sent ? "checkmark" : "paperplane.fill")
-                                .font(.rounded(17))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 22)
-                                .padding(.vertical, 14)
-                                .background(sent ? Palette.green : Palette.blue, in: Capsule())
+                            HStack(spacing: 8) {
+                                if sending {
+                                    ProgressView()
+                                        .progressViewStyle(.circular)
+                                        .tint(.white)
+                                    Text("Sending…")
+                                } else {
+                                    Image(systemName: sent ? "checkmark" : "paperplane.fill")
+                                    Text(sent ? "Sent!" : "Send to family")
+                                }
+                            }
+                            .font(.rounded(17))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 22)
+                            .padding(.vertical, 14)
+                            .background(
+                                sent ? Palette.green : (sending ? Palette.blue.opacity(0.75) : Palette.blue),
+                                in: Capsule()
+                            )
                         }
                         .buttonStyle(BouncyButtonStyle())
-                        .disabled(sent)
+                        .disabled(sending || sent)
                     }
 
                     Button {
@@ -571,6 +589,7 @@ struct KidGalleryView: View {
                         photoStore.delete(url)
                         selected = nil
                         sent = false
+                        sending = false
                     } label: {
                         Image(systemName: "trash.fill")
                             .font(.system(size: 18, weight: .bold))

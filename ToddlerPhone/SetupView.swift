@@ -365,6 +365,7 @@ struct ParentHomeView: View {
     @State private var showSettings = false
     @State private var showFamilyChat = false
     @State private var showPhotoWall = false
+    @State private var showFamilyMembers = false
     @State private var kidStatuses: [FamilyStore.DeviceStatus] = []
     @State private var testResult: String?
     @State private var testing = false
@@ -406,7 +407,7 @@ struct ParentHomeView: View {
                             HStack(spacing: 12) {
                                 InitialsAvatar(name: status.name, color: Palette.teal, size: 44)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text("\(status.name)'s phone")
+                                    Text(status.title)
                                         .font(.rounded(16, weight: .semibold))
                                         .foregroundStyle(Palette.ink)
                                     HStack(spacing: 4) {
@@ -429,6 +430,30 @@ struct ParentHomeView: View {
                         }
 
                         if familyStore.isConnected {
+                            Button {
+                                Sfx.tap()
+                                showFamilyMembers = true
+                            } label: {
+                                HStack(spacing: 12) {
+                                    SymbolAvatar(symbol: "person.2.badge.gearshape.fill", color: Palette.indigo, size: 52)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Family members")
+                                            .font(.rounded(18, weight: .semibold))
+                                            .foregroundStyle(Palette.ink)
+                                        Text(membersSubtitle)
+                                            .font(.rounded(13, weight: .medium))
+                                            .foregroundStyle(Palette.inkSoft)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 15, weight: .bold))
+                                        .foregroundStyle(Palette.inkSoft.opacity(0.6))
+                                }
+                                .padding(12)
+                                .card(cornerRadius: 24)
+                            }
+                            .buttonStyle(BouncyButtonStyle())
+
                             Button {
                                 Sfx.tap()
                                 showFamilyChat = true
@@ -586,6 +611,9 @@ struct ParentHomeView: View {
         .fullScreenCover(isPresented: $showPhotoWall) {
             FamilyPhotoWallView()
         }
+        .sheet(isPresented: $showFamilyMembers) {
+            FamilyMembersView()
+        }
         .task {
             // Poll for incoming rings/messages and kid-phone status.
             var lastStatusFetch = Date.distantPast
@@ -599,11 +627,25 @@ struct ParentHomeView: View {
                     }
                     if Date.now.timeIntervalSince(lastStatusFetch) > 60 {
                         lastStatusFetch = .now
+                        // Announce this grown-up phone as well, so every other
+                        // phone in the family can see and call it by name.
+                        await familyStore.publishStatus()
                         kidStatuses = await familyStore.fetchStatuses()
                     }
                 }
                 try? await Task.sleep(for: .seconds(12))
             }
+        }
+    }
+
+    /// "You and 2 others" style summary for the family members card.
+    private var membersSubtitle: String {
+        let others = familyStore.members.count
+        let me = familyStore.displayName.isEmpty ? "This phone" : familyStore.displayName
+        switch others {
+        case 0: return "\(me) · add someone with the family code"
+        case 1: return "\(me) and 1 other phone"
+        default: return "\(me) and \(others) other phones"
         }
     }
 

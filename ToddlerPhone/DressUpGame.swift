@@ -373,11 +373,17 @@ struct DressUpView: View {
             Button {
                 sendToFamily()
             } label: {
-                Image(systemName: sentConfirmation ? "checkmark" : "paperplane.fill")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(sentConfirmation ? Palette.green : Palette.ink)
-                    .frame(width: 48, height: 48)
-                    .card(cornerRadius: 16)
+                Group {
+                    if sending {
+                        ProgressView().progressViewStyle(.circular)
+                    } else {
+                        Image(systemName: sentConfirmation ? "checkmark" : "paperplane.fill")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(sentConfirmation ? Palette.green : Palette.ink)
+                    }
+                }
+                .frame(width: 48, height: 48)
+                .card(cornerRadius: 16)
             }
             .buttonStyle(BouncyButtonStyle())
             .disabled(sending || sentConfirmation)
@@ -1005,239 +1011,554 @@ struct ExtraPreview: View {
 }
 
 // MARK: - The character
+//
+// Everything is drawn from shapes, but every part carries the same soft dark
+// outline and the proportions come from one set of measurements, so the whole
+// character reads as a single sticker rather than a pile of rectangles.
 
-/// A friendly flat-design character drawn entirely with shapes.
+/// The ink all of the outlines share.
+enum DressInk {
+    static let line = Color(red: 0.27, green: 0.23, blue: 0.28)
+    static let soft = Color(red: 0.27, green: 0.23, blue: 0.28).opacity(0.22)
+}
+
+extension Shape {
+    /// Flat fill plus the character outline.
+    func inked(_ color: Color, _ width: CGFloat, opacity: Double = 0.85) -> some View {
+        self.fill(color)
+            .overlay(self.stroke(DressInk.line.opacity(opacity), lineWidth: width))
+    }
+}
+
+/// Where every part of the body sits, worked out once from the canvas size.
+struct DressMetrics {
+    let w: CGFloat
+    let h: CGFloat
+    let headD: CGFloat
+    let cx: CGFloat
+    let headY: CGFloat
+    let torsoTop: CGFloat
+    let torsoH: CGFloat
+    let torsoW: CGFloat
+    let hipY: CGFloat
+    let legH: CGFloat
+    let legW: CGFloat
+    let legGap: CGFloat
+    let footY: CGFloat
+    let lw: CGFloat
+
+    init(_ size: CGSize) {
+        w = size.width
+        h = size.height
+        headD = min(h * 0.255, w * 0.56)
+        cx = size.width / 2
+        // Low enough that tall hats and bunny ears stay on the canvas.
+        headY = h * 0.255
+        torsoTop = headY + headD * 0.42
+        torsoH = h * 0.280
+        torsoW = headD * 1.06
+        hipY = torsoTop + torsoH
+        legH = h * 0.170
+        legW = headD * 0.26
+        legGap = headD * 0.16
+        footY = hipY + legH
+        lw = max(1.1, headD * 0.036)
+    }
+
+    /// Middle of one leg. Side is -1 for the left leg, 1 for the right.
+    func legX(_ side: CGFloat) -> CGFloat { cx + side * (legW + legGap) / 2 }
+
+    var armW: CGFloat { headD * 0.21 }
+    var armL: CGFloat { torsoH * 0.95 }
+    var shoulderY: CGFloat { torsoTop + torsoH * 0.05 }
+    /// Arms hang just clear of the body so they are always visible.
+    func shoulderX(_ side: CGFloat) -> CGFloat { cx + side * (torsoW * 0.5 - armW * 0.20) }
+    /// How far the arms swing away from the body.
+    static let armAngle: Double = 16
+    /// Where the hand ends up once the arm is swung out.
+    func handPoint(_ side: CGFloat) -> CGPoint {
+        let angle = CGFloat(Self.armAngle) * .pi / 180
+        let reach = armL - armW * 0.3
+        return CGPoint(
+            x: shoulderX(side) + side * sin(angle) * reach,
+            y: shoulderY + cos(angle) * reach
+        )
+    }
+}
+
+/// Body outline: narrow at the shoulders, rounded at the hips. The same shape
+/// draws a t-shirt, a hoodie, a striped jumper and, flared out, a dress.
+struct DressBodyShape: Shape {
+    var shoulder: CGFloat = 0.84
+    var hip: CGFloat = 1.0
+
+    func path(in r: CGRect) -> Path {
+        let sw = r.width * shoulder
+        let hw = r.width * hip
+        let cx = r.midX
+        let top = r.minY
+        let bottom = r.maxY
+        let shoulderDrop = r.height * 0.11
+
+        var path = Path()
+        path.move(to: CGPoint(x: cx - sw / 2, y: top + shoulderDrop))
+        path.addQuadCurve(
+            to: CGPoint(x: cx, y: top),
+            control: CGPoint(x: cx - sw * 0.30, y: top - r.height * 0.015)
+        )
+        path.addQuadCurve(
+            to: CGPoint(x: cx + sw / 2, y: top + shoulderDrop),
+            control: CGPoint(x: cx + sw * 0.30, y: top - r.height * 0.015)
+        )
+        path.addCurve(
+            to: CGPoint(x: cx + hw / 2, y: bottom - r.height * 0.14),
+            control1: CGPoint(x: cx + sw * 0.58, y: top + r.height * 0.45),
+            control2: CGPoint(x: cx + hw * 0.52, y: bottom - r.height * 0.38)
+        )
+        path.addQuadCurve(
+            to: CGPoint(x: cx, y: bottom),
+            control: CGPoint(x: cx + hw * 0.36, y: bottom)
+        )
+        path.addQuadCurve(
+            to: CGPoint(x: cx - hw / 2, y: bottom - r.height * 0.14),
+            control: CGPoint(x: cx - hw * 0.36, y: bottom)
+        )
+        path.addCurve(
+            to: CGPoint(x: cx - sw / 2, y: top + shoulderDrop),
+            control1: CGPoint(x: cx - hw * 0.52, y: bottom - r.height * 0.38),
+            control2: CGPoint(x: cx - sw * 0.58, y: top + r.height * 0.45)
+        )
+        path.closeSubpath()
+        return path
+    }
+}
+
+/// A friendly outlined character: child, bear or bunny.
 struct CharacterView: View {
     let outfit: DressOutfit
     var blinking: Bool = false
 
     private var isDress: Bool { outfit.top == 1 }
     private var isOveralls: Bool { outfit.top == 4 }
+    private var isHoodie: Bool { outfit.top == 2 }
+    private var wideBottom: Bool { isDress || (outfit.bottom == 1 && !isOveralls) }
 
     var body: some View {
         GeometryReader { geo in
-            let w = geo.size.width
-            let h = geo.size.height
-            let head = min(w, h) * 0.30
-            let cx = w / 2
-            let headY = h * 0.24
+            let m = DressMetrics(geo.size)
 
             ZStack {
-                if outfit.extra == 2 {
-                    // Backpack behind the body
-                    RoundedRectangle(cornerRadius: head * 0.24)
-                        .fill(outfit.bottomShade)
-                        .frame(width: head * 1.5, height: head * 1.2)
-                        .position(x: cx, y: h * 0.54)
+                // Soft shadow on the floor keeps the character standing up.
+                Ellipse()
+                    .fill(DressInk.line.opacity(0.12))
+                    .frame(width: m.headD * 1.5, height: m.headD * 0.22)
+                    .position(x: m.cx, y: min(m.h - m.headD * 0.08, m.footY + m.headD * 0.30))
+
+                backpack(m)
+                legs(m)
+                shoes(m)
+                // A dress or a skirt flares out over the hands, so the arms
+                // come forward in front of those instead of behind them.
+                if !wideBottom {
+                    arm(-1, m)
+                    arm(1, m)
                 }
-
-                legsView(head: head, cx: cx, h: h)
-                shoesView(head: head, cx: cx, h: h)
-                armsView(head: head, cx: cx, y: h * 0.50)
-                torsoView(head: head, cx: cx, h: h)
-
-                if outfit.extra == 2 {
-                    // Straps across the chest
-                    HStack(spacing: head * 0.5) {
-                        Capsule().fill(outfit.bottomShade).frame(width: head * 0.14, height: head * 0.9)
-                        Capsule().fill(outfit.bottomShade).frame(width: head * 0.14, height: head * 0.9)
-                    }
-                    .position(x: cx, y: h * 0.5)
+                neck(m)
+                clothes(m)
+                if wideBottom {
+                    arm(-1, m)
+                    arm(1, m)
                 }
+                accessories(m)
 
-                if outfit.extra == 3 {
-                    // Necklace under the chin
-                    ZStack {
-                        Circle()
-                            .trim(from: 0, to: 0.5)
-                            .stroke(Palette.yellow, style: StrokeStyle(lineWidth: head * 0.05, lineCap: .round))
-                            .frame(width: head * 0.62, height: head * 0.62)
-                        Circle().fill(Palette.pink).frame(width: head * 0.14)
-                            .offset(y: head * 0.33)
-                    }
-                    .position(x: cx, y: headY + head * 0.58)
-                }
-
-                if outfit.extra == 4 {
-                    // A little wand in one hand
-                    ZStack {
-                        Capsule().fill(Palette.brown)
-                            .frame(width: head * 0.09, height: head * 0.8)
-                        StarShape().fill(Palette.yellow)
-                            .frame(width: head * 0.36, height: head * 0.36)
-                            .offset(y: -head * 0.46)
-                    }
-                    .rotationEffect(.degrees(18))
-                    .position(x: cx + head * 0.86, y: h * 0.5)
-                }
-
-                // Neck
-                RoundedRectangle(cornerRadius: head * 0.08)
-                    .fill(outfit.skinColor)
-                    .frame(width: head * 0.3, height: head * 0.26)
-                    .position(x: cx, y: headY + head * 0.5)
-
-                DressHead(outfit: outfit, blinking: blinking, head: head)
-                    .frame(width: head * 2.6, height: head * 2.6)
-                    .position(x: cx, y: headY)
+                DressHead(outfit: outfit, blinking: blinking, head: m.headD)
+                    .frame(width: m.headD * 2.6, height: m.headD * 2.6)
+                    .position(x: m.cx, y: m.headY)
             }
             .animation(.spring(response: 0.35), value: outfit)
         }
         .aspectRatio(0.72, contentMode: .fit)
     }
 
-    // MARK: Body parts
+    // MARK: Legs and feet
 
     @ViewBuilder
-    private func legsView(head: CGFloat, cx: CGFloat, h: CGFloat) -> some View {
-        let pantsColor: Color = isOveralls ? outfit.topShade : outfit.bottomShade
-        let full = !isDress && (outfit.bottom == 0 || isOveralls)
-        let legColor: Color = full ? pantsColor : outfit.skinColor
+    private func legs(_ m: DressMetrics) -> some View {
+        let pants: Color = isOveralls ? outfit.topShade : outfit.bottomShade
+        let covered = !isDress && (outfit.bottom == 0 || isOveralls)
+        let legColor: Color = covered ? pants : outfit.skinColor
+        let legH = m.legH + m.headD * 0.12
 
         ZStack {
-            HStack(spacing: head * 0.16) {
-                Capsule().fill(legColor).frame(width: head * 0.3, height: head * 0.95)
-                Capsule().fill(legColor).frame(width: head * 0.3, height: head * 0.95)
+            ForEach([-1.0, 1.0], id: \.self) { side in
+                Capsule()
+                    .inked(legColor, m.lw)
+                    .frame(width: m.legW, height: legH)
+                    .position(x: m.legX(CGFloat(side)), y: m.hipY + legH / 2 - m.headD * 0.10)
             }
-            .position(x: cx, y: h * 0.74)
 
-            // Shorts sit over the top of the legs
+            // Shorts sit over the top of the legs.
             if outfit.bottom == 2 && !isDress && !isOveralls {
-                HStack(spacing: head * 0.12) {
-                    Capsule().fill(outfit.bottomShade).frame(width: head * 0.34, height: head * 0.46)
-                    Capsule().fill(outfit.bottomShade).frame(width: head * 0.34, height: head * 0.46)
+                ForEach([-1.0, 1.0], id: \.self) { side in
+                    RoundedRectangle(cornerRadius: m.legW * 0.34)
+                        .inked(outfit.bottomShade, m.lw)
+                        .frame(width: m.legW * 1.32, height: m.legH * 0.78)
+                        .position(
+                            x: m.legX(CGFloat(side)) + CGFloat(side) * m.legW * 0.08,
+                            y: m.hipY + m.legH * 0.18
+                        )
                 }
-                .position(x: cx, y: h * 0.68)
             }
         }
     }
 
     @ViewBuilder
-    private func shoesView(head: CGFloat, cx: CGFloat, h: CGFloat) -> some View {
-        HStack(spacing: head * 0.14) {
-            shoe(head: head)
-            shoe(head: head)
+    private func shoes(_ m: DressMetrics) -> some View {
+        ForEach([-1.0, 1.0], id: \.self) { side in
+            shoe(m)
+                .scaleEffect(x: CGFloat(side), y: 1)
+                .position(x: m.legX(CGFloat(side)), y: m.footY + m.headD * 0.05)
         }
-        .position(x: cx, y: h * 0.86)
     }
 
+    /// One shoe, always drawn facing right and mirrored for the other foot.
     @ViewBuilder
-    private func shoe(head: CGFloat) -> some View {
+    private func shoe(_ m: DressMetrics) -> some View {
+        let unit = m.headD
         switch outfit.shoes {
         case 1:
-            VStack(spacing: head * 0.01) {
-                Capsule().fill(.white).frame(width: head * 0.34, height: head * 0.14)
-                Capsule().fill(Palette.ink).frame(width: head * 0.38, height: head * 0.08)
-            }
-        case 2:
-            VStack(spacing: 0) {
-                RoundedRectangle(cornerRadius: head * 0.06)
-                    .fill(Palette.brown)
-                    .frame(width: head * 0.28, height: head * 0.28)
-                Capsule().fill(Palette.ink.opacity(0.85)).frame(width: head * 0.38, height: head * 0.1)
-            }
-        case 3:
-            ZStack {
-                Capsule().fill(Palette.brown).frame(width: head * 0.34, height: head * 0.1)
-                Capsule().fill(Palette.brown.opacity(0.7))
-                    .frame(width: head * 0.07, height: head * 0.2)
-                    .rotationEffect(.degrees(22))
-            }
-        default:
-            Capsule().fill(outfit.skinColor).frame(width: head * 0.32, height: head * 0.16)
-        }
-    }
-
-    private func armsView(head: CGFloat, cx: CGFloat, y: CGFloat) -> some View {
-        let sleeve: Color = isOveralls ? .white : outfit.topShade
-        return HStack(spacing: head * 1.3) {
-            VStack(spacing: 0) {
-                Capsule().fill(sleeve).frame(width: head * 0.22, height: head * 0.62)
-                Circle().fill(outfit.skinColor).frame(width: head * 0.24)
-            }
-            .rotationEffect(.degrees(14))
-            VStack(spacing: 0) {
-                Capsule().fill(sleeve).frame(width: head * 0.22, height: head * 0.62)
-                Circle().fill(outfit.skinColor).frame(width: head * 0.24)
-            }
-            .rotationEffect(.degrees(-14))
-        }
-        .position(x: cx, y: y)
-    }
-
-    @ViewBuilder
-    private func torsoView(head: CGFloat, cx: CGFloat, h: CGFloat) -> some View {
-        switch outfit.top {
-        case 1:
-            TrapezoidShape(topInset: 0.28)
-                .fill(outfit.topShade)
-                .frame(width: head * 1.55, height: head * 1.5)
-                .position(x: cx, y: h * 0.55)
-        case 2:
-            ZStack {
-                // Hood behind the shoulders
-                Circle()
-                    .fill(outfit.topShade.opacity(0.85))
-                    .frame(width: head * 0.9, height: head * 0.9)
-                    .offset(y: -head * 0.62)
-                RoundedRectangle(cornerRadius: head * 0.3)
-                    .fill(outfit.topShade)
-                    .frame(width: head * 1.32, height: head * 1.16)
+            // Sneaker: a rounded toe, a white sole and one stripe.
+            ZStack(alignment: .bottom) {
+                ShoeShape()
+                    .inked(.white, m.lw)
+                    .frame(width: unit * 0.46, height: unit * 0.28)
                 Capsule()
-                    .fill(outfit.topShade.opacity(0.7))
-                    .frame(width: head * 0.6, height: head * 0.22)
-                    .offset(y: head * 0.3)
+                    .inked(outfit.topShade, m.lw * 0.8)
+                    .frame(width: unit * 0.50, height: unit * 0.10)
+                    .offset(y: unit * 0.01)
             }
-            .position(x: cx, y: h * 0.52)
-            skirtIfNeeded(head: head, cx: cx, h: h)
+            .frame(width: unit * 0.54, height: unit * 0.32, alignment: .bottom)
+        case 2:
+            // Boot with a thick sole.
+            ZStack(alignment: .bottom) {
+                RoundedRectangle(cornerRadius: unit * 0.09)
+                    .inked(Palette.brown, m.lw)
+                    .frame(width: unit * 0.33, height: unit * 0.38)
+                Capsule()
+                    .inked(Palette.brown.opacity(0.75), m.lw * 0.8)
+                    .frame(width: unit * 0.42, height: unit * 0.12)
+            }
+            .frame(width: unit * 0.46, height: unit * 0.42, alignment: .bottom)
         case 3:
-            RoundedRectangle(cornerRadius: head * 0.3)
-                .fill(outfit.topShade)
-                .frame(width: head * 1.25, height: head * 1.1)
-                .overlay(
-                    VStack(spacing: head * 0.16) {
-                        ForEach(0..<3, id: \.self) { _ in
-                            Capsule().fill(.white.opacity(0.85)).frame(height: head * 0.1)
-                        }
-                    }
-                    .frame(width: head * 1.25, height: head * 1.1)
-                    .clipShape(RoundedRectangle(cornerRadius: head * 0.3))
-                )
-                .position(x: cx, y: h * 0.52)
-            skirtIfNeeded(head: head, cx: cx, h: h)
-        case 4:
+            // Sandal: a flat sole with a strap over the foot.
             ZStack {
-                RoundedRectangle(cornerRadius: head * 0.3)
-                    .fill(.white)
-                    .frame(width: head * 1.25, height: head * 1.1)
-                RoundedRectangle(cornerRadius: head * 0.16)
-                    .fill(outfit.topShade)
-                    .frame(width: head * 0.86, height: head * 0.8)
-                    .offset(y: head * 0.18)
-                HStack(spacing: head * 0.54) {
-                    Capsule().fill(outfit.topShade).frame(width: head * 0.16, height: head * 0.62)
-                    Capsule().fill(outfit.topShade).frame(width: head * 0.16, height: head * 0.62)
-                }
-                .offset(y: -head * 0.3)
+                Capsule()
+                    .inked(outfit.skinColor, m.lw)
+                    .frame(width: unit * 0.36, height: unit * 0.15)
+                    .offset(y: -unit * 0.07)
+                Capsule()
+                    .inked(Palette.brown, m.lw * 0.8)
+                    .frame(width: unit * 0.40, height: unit * 0.09)
+                Capsule()
+                    .inked(Palette.brown, m.lw * 0.7)
+                    .frame(width: unit * 0.24, height: unit * 0.07)
+                    .offset(y: -unit * 0.10)
             }
-            .position(x: cx, y: h * 0.52)
+            .frame(width: unit * 0.44, height: unit * 0.26)
         default:
-            RoundedRectangle(cornerRadius: head * 0.3)
-                .fill(outfit.topShade)
-                .frame(width: head * 1.25, height: head * 1.1)
-                .position(x: cx, y: h * 0.52)
-            skirtIfNeeded(head: head, cx: cx, h: h)
+            // Bare foot.
+            ShoeShape()
+                .inked(outfit.skinColor, m.lw)
+                .frame(width: unit * 0.40, height: unit * 0.21)
+        }
+    }
+
+    // MARK: Arms
+
+    @ViewBuilder
+    private func arm(_ side: CGFloat, _ m: DressMetrics) -> some View {
+        let armW = m.armW
+        let armL = m.armL
+        let handD = armW * 1.2
+        let sleeveColor: Color = isOveralls ? .white : outfit.topShade
+        let sleeve: CGFloat = {
+            switch outfit.top {
+            case 1: return armL * 0.34        // dress, little cap sleeve
+            case 2: return armL * 0.94        // hoodie, long sleeve
+            case 3: return armL * 0.62        // jumper, three quarter sleeve
+            case 4: return armL * 0.40        // overalls over a white tee
+            default: return armL * 0.38       // t-shirt
+            }
+        }()
+
+        ZStack(alignment: .top) {
+            Capsule()
+                .inked(outfit.skinColor, m.lw)
+                .frame(width: armW, height: armL)
+            Capsule()
+                .inked(sleeveColor, m.lw)
+                .frame(width: armW * 1.16, height: sleeve)
+            Circle()
+                .inked(outfit.skinColor, m.lw)
+                .frame(width: handD, height: handD)
+                .offset(y: armL - handD * 0.78)
+        }
+        .frame(width: armW * 1.3, height: armL + handD * 0.3, alignment: .top)
+        .rotationEffect(.degrees(-Double(side) * DressMetrics.armAngle), anchor: .top)
+        .position(
+            x: m.shoulderX(side),
+            y: m.shoulderY + (armL + handD * 0.3) / 2
+        )
+    }
+
+    // MARK: Neck, body and clothes
+
+    @ViewBuilder
+    private func neck(_ m: DressMetrics) -> some View {
+        Capsule()
+            .inked(outfit.skinColor, m.lw)
+            .frame(width: m.headD * 0.30, height: m.headD * 0.34)
+            .position(x: m.cx, y: m.headY + m.headD * 0.46)
+    }
+
+    @ViewBuilder
+    private func clothes(_ m: DressMetrics) -> some View {
+        ZStack {
+            if isHoodie {
+                // The hood sits behind the shoulders.
+                Circle()
+                    .inked(outfit.topShade, m.lw)
+                    .frame(width: m.headD * 0.96, height: m.headD * 0.96)
+                    .position(x: m.cx, y: m.torsoTop - m.headD * 0.04)
+            }
+
+            switch outfit.top {
+            case 1:
+                dressBody(m)
+            case 2:
+                hoodieBody(m)
+            case 3:
+                stripedBody(m)
+            case 4:
+                overallsBody(m)
+            default:
+                plainBody(m)
+            }
+
+            if outfit.bottom == 1 && !isDress && !isOveralls {
+                skirt(m)
+            }
+        }
+    }
+
+    /// The body panel every top is built on.
+    private func bodyPanel(_ m: DressMetrics, hip: CGFloat = 1.0, height: CGFloat? = nil) -> some View {
+        let height = height ?? m.torsoH
+        return DressBodyShape(shoulder: 0.84, hip: hip)
+            .frame(width: m.torsoW * max(1, hip), height: height)
+            .position(x: m.cx, y: m.torsoTop + height / 2)
+    }
+
+    @ViewBuilder
+    private func plainBody(_ m: DressMetrics) -> some View {
+        let shape = DressBodyShape()
+        shape
+            .inked(outfit.topShade, m.lw)
+            .frame(width: m.torsoW, height: m.torsoH)
+            .overlay(
+                // Collar.
+                Circle()
+                    .trim(from: 0.04, to: 0.46)
+                    .stroke(DressInk.line.opacity(0.4), style: StrokeStyle(lineWidth: m.lw, lineCap: .round))
+                    .frame(width: m.headD * 0.34, height: m.headD * 0.26)
+                    .offset(y: -m.torsoH * 0.40)
+            )
+            .position(x: m.cx, y: m.torsoTop + m.torsoH / 2)
+    }
+
+    @ViewBuilder
+    private func dressBody(_ m: DressMetrics) -> some View {
+        let height = m.torsoH * 1.12
+        DressBodyShape(shoulder: 0.78, hip: 1.26)
+            .inked(outfit.topShade, m.lw)
+            .frame(width: m.torsoW * 1.26, height: height)
+            .overlay(
+                // Waistband and a hem line.
+                VStack(spacing: 0) {
+                    Capsule()
+                        .fill(DressInk.line.opacity(0.18))
+                        .frame(width: m.torsoW * 0.66, height: m.lw * 1.6)
+                        .offset(y: height * 0.08)
+                    Spacer(minLength: 0)
+                }
+                .frame(height: height)
+            )
+            .position(x: m.cx, y: m.torsoTop + height / 2)
+    }
+
+    @ViewBuilder
+    private func hoodieBody(_ m: DressMetrics) -> some View {
+        let shape = DressBodyShape(shoulder: 0.88, hip: 1.06)
+        shape
+            .inked(outfit.topShade, m.lw)
+            .frame(width: m.torsoW * 1.06, height: m.torsoH)
+            .overlay(
+                ZStack {
+                    // Zip.
+                    Capsule()
+                        .fill(DressInk.line.opacity(0.28))
+                        .frame(width: m.lw * 1.2, height: m.torsoH * 0.62)
+                        .offset(y: -m.torsoH * 0.06)
+                    // Pocket.
+                    Capsule()
+                        .strokeBorder(DressInk.line.opacity(0.35), lineWidth: m.lw)
+                        .frame(width: m.torsoW * 0.62, height: m.torsoH * 0.22)
+                        .offset(y: m.torsoH * 0.26)
+                }
+            )
+            .position(x: m.cx, y: m.torsoTop + m.torsoH / 2)
+    }
+
+    @ViewBuilder
+    private func stripedBody(_ m: DressMetrics) -> some View {
+        let shape = DressBodyShape()
+        shape
+            .inked(outfit.topShade, m.lw)
+            .frame(width: m.torsoW, height: m.torsoH)
+            .overlay(
+                VStack(spacing: m.torsoH * 0.11) {
+                    ForEach(0..<4, id: \.self) { _ in
+                        Capsule()
+                            .fill(.white.opacity(0.9))
+                            .frame(height: m.torsoH * 0.09)
+                    }
+                }
+                .frame(width: m.torsoW, height: m.torsoH)
+                .clipShape(shape)
+            )
+            .overlay(shape.stroke(DressInk.line.opacity(0.85), lineWidth: m.lw))
+            .position(x: m.cx, y: m.torsoTop + m.torsoH / 2)
+    }
+
+    @ViewBuilder
+    private func overallsBody(_ m: DressMetrics) -> some View {
+        let shape = DressBodyShape()
+        ZStack {
+            // White tee underneath.
+            shape
+                .inked(.white, m.lw)
+                .frame(width: m.torsoW, height: m.torsoH)
+            // Bib and straps.
+            RoundedRectangle(cornerRadius: m.headD * 0.10)
+                .inked(outfit.topShade, m.lw)
+                .frame(width: m.torsoW * 0.62, height: m.torsoH * 0.58)
+                .offset(y: m.torsoH * 0.16)
+            ForEach([-1.0, 1.0], id: \.self) { side in
+                Capsule()
+                    .inked(outfit.topShade, m.lw * 0.9)
+                    .frame(width: m.torsoW * 0.14, height: m.torsoH * 0.46)
+                    .offset(x: CGFloat(side) * m.torsoW * 0.22, y: -m.torsoH * 0.19)
+            }
+            // Two buttons on the bib.
+            HStack(spacing: m.torsoW * 0.38) {
+                Circle().inked(Palette.yellow, m.lw * 0.7).frame(width: m.headD * 0.09)
+                Circle().inked(Palette.yellow, m.lw * 0.7).frame(width: m.headD * 0.09)
+            }
+            .offset(y: -m.torsoH * 0.02)
+        }
+        .frame(width: m.torsoW, height: m.torsoH)
+        .position(x: m.cx, y: m.torsoTop + m.torsoH / 2)
+    }
+
+    @ViewBuilder
+    private func skirt(_ m: DressMetrics) -> some View {
+        TrapezoidShape(topInset: 0.30)
+            .inked(outfit.bottomShade, m.lw)
+            .frame(width: m.torsoW * 1.26, height: m.headD * 0.56)
+            .position(x: m.cx, y: m.hipY - m.headD * 0.10)
+    }
+
+    // MARK: Extras
+
+    @ViewBuilder
+    private func backpack(_ m: DressMetrics) -> some View {
+        if outfit.extra == 2 {
+            RoundedRectangle(cornerRadius: m.headD * 0.20)
+                .inked(outfit.bottomShade, m.lw)
+                .frame(width: m.torsoW * 1.34, height: m.torsoH * 0.82)
+                .position(x: m.cx, y: m.torsoTop + m.torsoH * 0.52)
         }
     }
 
     @ViewBuilder
-    private func skirtIfNeeded(head: CGFloat, cx: CGFloat, h: CGFloat) -> some View {
-        if outfit.bottom == 1 {
-            TrapezoidShape(topInset: 0.3)
-                .fill(outfit.bottomShade)
-                .frame(width: head * 1.45, height: head * 0.75)
-                .position(x: cx, y: h * 0.65)
+    private func accessories(_ m: DressMetrics) -> some View {
+        if outfit.extra == 2 {
+            // Straps over the shoulders.
+            ForEach([-1.0, 1.0], id: \.self) { side in
+                Capsule()
+                    .inked(outfit.bottomShade.opacity(0.95), m.lw * 0.8)
+                    .frame(width: m.headD * 0.13, height: m.torsoH * 0.56)
+                    .position(
+                        x: m.cx + CGFloat(side) * m.torsoW * 0.26,
+                        y: m.torsoTop + m.torsoH * 0.28
+                    )
+            }
         }
+
+        if outfit.extra == 3 {
+            ZStack {
+                Circle()
+                    .trim(from: 0.08, to: 0.42)
+                    .stroke(Palette.yellow, style: StrokeStyle(lineWidth: m.lw * 1.6, lineCap: .round))
+                    .frame(width: m.headD * 0.52, height: m.headD * 0.40)
+                Circle()
+                    .inked(Palette.pink, m.lw * 0.7)
+                    .frame(width: m.headD * 0.13)
+                    .offset(y: m.headD * 0.22)
+            }
+            .position(x: m.cx, y: m.torsoTop + m.headD * 0.04)
+        }
+
+        if outfit.extra == 4 {
+            // A little wand, held in the right hand.
+            ZStack {
+                Capsule()
+                    .inked(Palette.brown, m.lw * 0.8)
+                    .frame(width: m.headD * 0.09, height: m.headD * 0.72)
+                StarShape()
+                    .inked(Palette.yellow, m.lw * 0.8)
+                    .frame(width: m.headD * 0.34, height: m.headD * 0.34)
+                    .offset(y: -m.headD * 0.44)
+            }
+            .rotationEffect(.degrees(16))
+            .position(
+                x: m.handPoint(1).x + m.headD * 0.04,
+                y: m.handPoint(1).y - m.headD * 0.16
+            )
+        }
+    }
+}
+
+/// Simple shoe outline: flat underneath, rounded over the toes.
+struct ShoeShape: Shape {
+    func path(in r: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: r.minX, y: r.maxY))
+        path.addLine(to: CGPoint(x: r.minX, y: r.midY))
+        path.addQuadCurve(
+            to: CGPoint(x: r.midX, y: r.minY),
+            control: CGPoint(x: r.minX + r.width * 0.06, y: r.minY)
+        )
+        path.addQuadCurve(
+            to: CGPoint(x: r.maxX, y: r.maxY - r.height * 0.18),
+            control: CGPoint(x: r.maxX, y: r.minY + r.height * 0.32)
+        )
+        path.addQuadCurve(
+            to: CGPoint(x: r.maxX - r.width * 0.12, y: r.maxY),
+            control: CGPoint(x: r.maxX, y: r.maxY)
+        )
+        path.closeSubpath()
+        return path
     }
 }
 
@@ -1251,79 +1572,65 @@ struct DressHead: View {
     private var isHijab: Bool { outfit.head == 4 }
     private var isHat: Bool { outfit.head == 1 || outfit.head == 2 || outfit.head == 5 }
     private var kind: DressCharacter { outfit.kind }
+    private var lw: CGFloat { max(1.1, head * 0.036) }
 
     var body: some View {
         ZStack {
-            // Scarf sits low, around the neck
-            if outfit.head == 3 {
-                ZStack {
-                    Capsule()
-                        .fill(outfit.headShade)
-                        .frame(width: head * 0.72, height: head * 0.34)
-                    RoundedRectangle(cornerRadius: head * 0.08)
-                        .fill(outfit.headShade)
-                        .frame(width: head * 0.22, height: head * 0.5)
-                        .offset(x: head * 0.22, y: head * 0.34)
-                }
-                .offset(y: head * 0.56)
-            }
+            if outfit.head == 3 { scarfView }
+            if isHijab { hijabView }
+            if !isHijab { earsView }
 
-            if isHijab {
-                Circle()
-                    .fill(outfit.headShade)
-                    .frame(width: head * 1.32, height: head * 1.32)
-                RoundedRectangle(cornerRadius: head * 0.3)
-                    .fill(outfit.headShade)
-                    .frame(width: head * 1.2, height: head * 0.95)
-                    .offset(y: head * 0.55)
-            }
-
-            if !isHijab {
-                earsView
-            }
-
-            // Head
+            // The head itself.
             Circle()
-                .fill(outfit.skinColor)
+                .inked(outfit.skinColor, lw)
                 .frame(width: head, height: head)
 
-            if kind.isAnimal {
-                // Muzzle
-                Ellipse()
-                    .fill(.white.opacity(0.55))
-                    .frame(width: head * 0.46, height: head * 0.32)
-                    .offset(y: head * 0.18)
-            }
+            if kind.isAnimal { muzzleView }
+            if !isHijab && !kind.isAnimal { hairView }
 
-            if !isHijab && !kind.isAnimal {
-                hairView
+            // Blush.
+            HStack(spacing: head * 0.40) {
+                Ellipse().fill(Palette.pink.opacity(0.35)).frame(width: head * 0.16, height: head * 0.10)
+                Ellipse().fill(Palette.pink.opacity(0.35)).frame(width: head * 0.16, height: head * 0.10)
             }
-
-            // Blush cheeks
-            HStack(spacing: head * 0.34) {
-                Circle().fill(Palette.pink.opacity(0.5)).frame(width: head * 0.15)
-                Circle().fill(Palette.pink.opacity(0.5)).frame(width: head * 0.15)
-            }
-            .offset(y: head * 0.12)
+            .offset(y: head * 0.14)
 
             eyesView
             mouthView
-
-            if kind.isAnimal {
-                Ellipse()
-                    .fill(Palette.ink)
-                    .frame(width: head * 0.16, height: head * 0.11)
-                    .offset(y: head * 0.11)
-            }
-
-            if outfit.extra == 1 {
-                glassesView
-            }
-
+            if kind.isAnimal { noseView }
+            if outfit.extra == 1 { glassesView }
             headwearView
         }
         .frame(width: head * 2.6, height: head * 2.6)
         .animation(.spring(response: 0.35), value: outfit)
+    }
+
+    // MARK: Scarf and hijab
+
+    private var scarfView: some View {
+        ZStack {
+            Capsule()
+                .inked(outfit.headShade, lw)
+                .frame(width: head * 0.78, height: head * 0.32)
+            RoundedRectangle(cornerRadius: head * 0.08)
+                .inked(outfit.headShade, lw)
+                .frame(width: head * 0.22, height: head * 0.48)
+                .offset(x: head * 0.24, y: head * 0.32)
+        }
+        .offset(y: head * 0.56)
+    }
+
+    private var hijabView: some View {
+        ZStack {
+            // Drape over the shoulders, then the part framing the face.
+            RoundedRectangle(cornerRadius: head * 0.34)
+                .inked(outfit.headShade, lw)
+                .frame(width: head * 1.16, height: head * 0.98)
+                .offset(y: head * 0.48)
+            Circle()
+                .inked(outfit.headShade, lw)
+                .frame(width: head * 1.26, height: head * 1.26)
+        }
     }
 
     // MARK: Ears
@@ -1332,37 +1639,45 @@ struct DressHead: View {
     private var earsView: some View {
         switch kind {
         case .child:
-            HStack(spacing: head * 0.8) {
-                Circle().fill(outfit.skinColor).frame(width: head * 0.2)
-                Circle().fill(outfit.skinColor).frame(width: head * 0.2)
+            HStack(spacing: head * 0.78) {
+                Circle().inked(outfit.skinColor, lw).frame(width: head * 0.22)
+                Circle().inked(outfit.skinColor, lw).frame(width: head * 0.22)
             }
+            .offset(y: head * 0.04)
         case .bear:
-            HStack(spacing: head * 0.6) {
-                ZStack {
-                    Circle().fill(outfit.skinColor).frame(width: head * 0.36)
-                    Circle().fill(Palette.pink.opacity(0.45)).frame(width: head * 0.18)
-                }
-                ZStack {
-                    Circle().fill(outfit.skinColor).frame(width: head * 0.36)
-                    Circle().fill(Palette.pink.opacity(0.45)).frame(width: head * 0.18)
-                }
+            HStack(spacing: head * 0.56) {
+                bearEar
+                bearEar
             }
-            .offset(y: -head * 0.44)
+            .offset(y: -head * 0.42)
         case .bunny:
-            HStack(spacing: head * 0.24) {
-                ZStack {
-                    Capsule().fill(outfit.skinColor).frame(width: head * 0.22, height: head * 0.66)
-                    Capsule().fill(Palette.pink.opacity(0.45)).frame(width: head * 0.1, height: head * 0.44)
-                }
-                .rotationEffect(.degrees(-10))
-                ZStack {
-                    Capsule().fill(outfit.skinColor).frame(width: head * 0.22, height: head * 0.66)
-                    Capsule().fill(Palette.pink.opacity(0.45)).frame(width: head * 0.1, height: head * 0.44)
-                }
-                .rotationEffect(.degrees(10))
+            HStack(spacing: head * 0.20) {
+                bunnyEar.rotationEffect(.degrees(-11))
+                bunnyEar.rotationEffect(.degrees(11))
             }
-            .offset(y: -head * 0.62)
+            .offset(y: -head * 0.60)
         }
+    }
+
+    private var bearEar: some View {
+        ZStack {
+            Circle().inked(outfit.skinColor, lw).frame(width: head * 0.38)
+            Circle().fill(Palette.pink.opacity(0.40)).frame(width: head * 0.18)
+        }
+    }
+
+    private var bunnyEar: some View {
+        ZStack {
+            Capsule().inked(outfit.skinColor, lw).frame(width: head * 0.24, height: head * 0.70)
+            Capsule().fill(Palette.pink.opacity(0.40)).frame(width: head * 0.10, height: head * 0.46)
+        }
+    }
+
+    private var muzzleView: some View {
+        Ellipse()
+            .inked(.white.opacity(0.92), lw * 0.8, opacity: 0.35)
+            .frame(width: head * 0.50, height: head * 0.34)
+            .offset(y: head * 0.20)
     }
 
     // MARK: Hair
@@ -1374,39 +1689,63 @@ struct DressHead: View {
         case 0:
             EmptyView()
         case 1:
-            Circle()
-                .trim(from: 0.5, to: 1.0)
-                .fill(outfit.hairShade)
-                .frame(width: head * 1.08, height: head * 1.08)
-                .offset(y: -head * 0.04)
-        case 2:
-            HStack(spacing: -head * 0.1) {
-                ForEach(0..<5, id: \.self) { _ in
-                    Circle().fill(outfit.hairShade).frame(width: head * 0.32)
+            // Short bowl cut. Under a hat only the sides show.
+            ZStack {
+                if !isHat {
+                    // Side locks beside the ears.
+                    ForEach([-1.0, 1.0], id: \.self) { side in
+                        Capsule()
+                            .inked(outfit.hairShade, lw)
+                            .frame(width: head * 0.15, height: head * 0.34)
+                            .offset(x: CGFloat(side) * head * 0.46, y: -head * 0.08)
+                    }
                 }
+                Circle()
+                    .trim(from: 0.5, to: 1.0)
+                    .inked(outfit.hairShade, lw)
+                    .frame(width: head * 1.06, height: head * 1.06)
+                    .offset(y: isHat ? -head * 0.22 : -head * 0.14)
             }
-            .offset(y: -head * 0.34)
-        default:
+        case 2:
+            // Curls all around the top of the head.
             ZStack {
                 Circle()
                     .trim(from: 0.5, to: 1.0)
-                    .fill(outfit.hairShade)
-                    .frame(width: head * 1.06, height: head * 1.06)
-                    .offset(y: -head * 0.02)
-                HStack(spacing: head * 0.94) {
-                    Circle().fill(outfit.hairShade).frame(width: head * 0.3)
-                    Circle().fill(outfit.hairShade).frame(width: head * 0.3)
+                    .inked(outfit.hairShade, lw)
+                    .frame(width: head * 1.0, height: head * 1.0)
+                    .offset(y: -head * 0.12)
+                ForEach(0..<5, id: \.self) { i in
+                    Circle()
+                        .inked(outfit.hairShade, lw)
+                        .frame(width: head * 0.30)
+                        .offset(
+                            x: head * (-0.38 + 0.19 * CGFloat(i)),
+                            y: -head * (0.46 - abs(2 - CGFloat(i)) * 0.05)
+                        )
                 }
-                .offset(y: -head * 0.28)
+            }
+        default:
+            // Two little buns.
+            ZStack {
+                ForEach([-1.0, 1.0], id: \.self) { side in
+                    Circle()
+                        .inked(outfit.hairShade, lw)
+                        .frame(width: head * 0.32)
+                        .offset(x: CGFloat(side) * head * 0.48, y: -head * 0.38)
+                }
+                Circle()
+                    .trim(from: 0.5, to: 1.0)
+                    .inked(outfit.hairShade, lw)
+                    .frame(width: head * 1.04, height: head * 1.04)
+                    .offset(y: -head * 0.13)
             }
         }
     }
 
     // MARK: Face
 
-    @ViewBuilder
     private var eyesView: some View {
-        HStack(spacing: head * 0.28) {
+        HStack(spacing: head * 0.14) {
             eye
             eye
         }
@@ -1417,27 +1756,31 @@ struct DressHead: View {
     private var eye: some View {
         if blinking && outfit.mood != .sleepy {
             Capsule()
-                .fill(Palette.ink)
-                .frame(width: head * 0.13, height: head * 0.035)
+                .fill(DressInk.line)
+                .frame(width: head * 0.17, height: head * 0.035)
         } else {
             switch outfit.mood {
-            case .happy:
-                Circle().fill(Palette.ink).frame(width: head * 0.09, height: head * 0.09)
+            case .happy, .surprised:
+                let white = outfit.mood == .surprised ? head * 0.24 : head * 0.21
+                ZStack {
+                    Circle().inked(.white, lw * 0.7, opacity: 0.6)
+                        .frame(width: white, height: white)
+                    Circle().fill(DressInk.line)
+                        .frame(width: white * 0.56, height: white * 0.56)
+                        .offset(y: white * 0.04)
+                    Circle().fill(.white)
+                        .frame(width: white * 0.18, height: white * 0.18)
+                        .offset(x: white * 0.14, y: -white * 0.12)
+                }
             case .giggly:
                 SmileShape()
-                    .stroke(Palette.ink, style: StrokeStyle(lineWidth: head * 0.035, lineCap: .round))
-                    .frame(width: head * 0.16, height: head * 0.08)
+                    .stroke(DressInk.line, style: StrokeStyle(lineWidth: head * 0.04, lineCap: .round))
+                    .frame(width: head * 0.19, height: head * 0.10)
                     .rotationEffect(.degrees(180))
-            case .surprised:
-                ZStack {
-                    Circle().fill(Palette.ink).frame(width: head * 0.15, height: head * 0.15)
-                    Circle().fill(.white).frame(width: head * 0.05, height: head * 0.05)
-                        .offset(x: head * 0.03, y: -head * 0.03)
-                }
             case .sleepy:
                 SmileShape()
-                    .stroke(Palette.ink, style: StrokeStyle(lineWidth: head * 0.035, lineCap: .round))
-                    .frame(width: head * 0.16, height: head * 0.06)
+                    .stroke(DressInk.line, style: StrokeStyle(lineWidth: head * 0.04, lineCap: .round))
+                    .frame(width: head * 0.19, height: head * 0.07)
             }
         }
     }
@@ -1446,38 +1789,53 @@ struct DressHead: View {
     private var mouthView: some View {
         switch outfit.mood {
         case .giggly:
-            Circle()
-                .trim(from: 0, to: 0.5)
-                .fill(Palette.ink)
-                .frame(width: head * 0.3, height: head * 0.3)
-                .offset(y: head * 0.16)
+            // Open laugh with a little tongue.
+            ZStack {
+                Circle()
+                    .trim(from: 0, to: 0.5)
+                    .fill(DressInk.line)
+                    .frame(width: head * 0.30, height: head * 0.30)
+                Circle()
+                    .trim(from: 0, to: 0.5)
+                    .fill(Palette.pink)
+                    .frame(width: head * 0.15, height: head * 0.15)
+                    .offset(y: head * 0.07)
+            }
+            .offset(y: head * 0.17)
         case .surprised:
             Ellipse()
-                .fill(Palette.ink)
-                .frame(width: head * 0.14, height: head * 0.18)
-                .offset(y: head * 0.24)
+                .fill(DressInk.line)
+                .frame(width: head * 0.15, height: head * 0.19)
+                .offset(y: head * 0.25)
         case .sleepy:
-            SmileShape()
-                .stroke(Palette.ink, style: StrokeStyle(lineWidth: head * 0.03, lineCap: .round))
-                .frame(width: head * 0.2, height: head * 0.1)
-                .offset(y: head * 0.22)
+            Ellipse()
+                .fill(DressInk.line.opacity(0.9))
+                .frame(width: head * 0.13, height: head * 0.11)
+                .offset(y: head * 0.24)
         default:
             SmileShape()
-                .stroke(Palette.ink, style: StrokeStyle(lineWidth: head * 0.035, lineCap: .round))
-                .frame(width: head * 0.32, height: head * 0.16)
-                .offset(y: head * 0.2)
+                .stroke(DressInk.line, style: StrokeStyle(lineWidth: head * 0.038, lineCap: .round))
+                .frame(width: head * 0.30, height: head * 0.15)
+                .offset(y: head * 0.20)
         }
     }
 
+    private var noseView: some View {
+        Ellipse()
+            .fill(DressInk.line)
+            .frame(width: head * 0.15, height: head * 0.10)
+            .offset(y: head * 0.10)
+    }
+
     private var glassesView: some View {
-        HStack(spacing: head * 0.04) {
+        HStack(spacing: head * 0.02) {
             Circle()
-                .stroke(Palette.ink, lineWidth: head * 0.035)
-                .frame(width: head * 0.26, height: head * 0.26)
-            Capsule().fill(Palette.ink).frame(width: head * 0.08, height: head * 0.03)
+                .stroke(DressInk.line, lineWidth: head * 0.035)
+                .frame(width: head * 0.28, height: head * 0.28)
+            Capsule().fill(DressInk.line).frame(width: head * 0.07, height: head * 0.03)
             Circle()
-                .stroke(Palette.ink, lineWidth: head * 0.035)
-                .frame(width: head * 0.26, height: head * 0.26)
+                .stroke(DressInk.line, lineWidth: head * 0.035)
+                .frame(width: head * 0.28, height: head * 0.28)
         }
         .offset(y: -head * 0.04)
     }
@@ -1488,66 +1846,74 @@ struct DressHead: View {
     private var headwearView: some View {
         switch outfit.head {
         case 1:
-            // Baseball cap: dome plus a brim
+            // Baseball cap: dome plus a brim.
             ZStack {
+                Capsule()
+                    .inked(outfit.headShade, lw)
+                    .frame(width: head * 0.72, height: head * 0.17)
+                    .offset(x: head * 0.46, y: head * 0.02)
                 Circle()
                     .trim(from: 0.5, to: 1.0)
-                    .fill(outfit.headShade)
-                    .frame(width: head * 1.04, height: head * 1.04)
-                Capsule()
-                    .fill(outfit.headShade)
-                    .frame(width: head * 0.7, height: head * 0.16)
-                    .offset(x: head * 0.45, y: head * 0.02)
+                    .inked(outfit.headShade, lw)
+                    .frame(width: head * 1.02, height: head * 1.02)
+                Circle()
+                    .inked(outfit.headShade, lw * 0.7)
+                    .frame(width: head * 0.12)
+                    .offset(y: -head * 0.46)
             }
-            .offset(y: -head * 0.34)
+            .offset(y: -head * 0.32)
         case 2:
-            // Sun hat: wide brim plus a dome
+            // Sun hat: wide brim plus a dome.
             ZStack {
                 Ellipse()
-                    .fill(outfit.headShade)
-                    .frame(width: head * 1.7, height: head * 0.36)
+                    .inked(outfit.headShade, lw)
+                    .frame(width: head * 1.66, height: head * 0.34)
                     .offset(y: head * 0.06)
                 Circle()
                     .trim(from: 0.5, to: 1.0)
-                    .fill(outfit.headShade)
-                    .frame(width: head * 0.9, height: head * 0.9)
-                    .offset(y: -head * 0.08)
+                    .inked(outfit.headShade, lw)
+                    .frame(width: head * 0.92, height: head * 0.92)
+                    .offset(y: -head * 0.06)
+                Capsule()
+                    .fill(Palette.pink.opacity(0.75))
+                    .frame(width: head * 0.88, height: head * 0.09)
+                    .offset(y: -head * 0.02)
             }
-            .offset(y: -head * 0.3)
+            .offset(y: -head * 0.28)
         case 5:
-            // Winter beanie with a bobble and a folded brim
+            // Winter beanie with a folded brim and a bobble.
             ZStack {
                 Circle()
                     .trim(from: 0.5, to: 1.0)
-                    .fill(outfit.headShade)
-                    .frame(width: head * 1.1, height: head * 1.1)
+                    .inked(outfit.headShade, lw)
+                    .frame(width: head * 1.08, height: head * 1.08)
                 Capsule()
-                    .fill(outfit.headShade.opacity(0.75))
-                    .frame(width: head * 1.12, height: head * 0.2)
-                    .offset(y: head * 0.02)
+                    .inked(outfit.headShade.opacity(0.85), lw)
+                    .frame(width: head * 1.12, height: head * 0.20)
+                    .offset(y: head * 0.03)
                 Circle()
-                    .fill(outfit.headShade.opacity(0.85))
+                    .inked(.white.opacity(0.9), lw * 0.8)
                     .frame(width: head * 0.26)
                     .offset(y: -head * 0.52)
             }
-            .offset(y: -head * 0.3)
+            .offset(y: -head * 0.30)
         case 6:
-            // Party hat with a pom on top
+            // Party hat with a pom on top.
             ZStack {
                 Triangle()
-                    .fill(outfit.headShade)
-                    .frame(width: head * 0.62, height: head * 0.78)
+                    .inked(outfit.headShade, lw)
+                    .frame(width: head * 0.62, height: head * 0.72)
                 Circle()
-                    .fill(Palette.pink)
-                    .frame(width: head * 0.2)
-                    .offset(y: -head * 0.44)
-                VStack(spacing: head * 0.1) {
-                    Circle().fill(.white.opacity(0.8)).frame(width: head * 0.1)
-                    Circle().fill(.white.opacity(0.8)).frame(width: head * 0.1)
+                    .inked(Palette.pink, lw * 0.8)
+                    .frame(width: head * 0.20)
+                    .offset(y: -head * 0.40)
+                VStack(spacing: head * 0.11) {
+                    Circle().fill(.white.opacity(0.85)).frame(width: head * 0.10)
+                    Circle().fill(.white.opacity(0.85)).frame(width: head * 0.10)
                 }
-                .offset(y: head * 0.1)
+                .offset(y: head * 0.12)
             }
-            .offset(y: -head * 0.72)
+            .offset(y: -head * 0.62)
         default:
             EmptyView()
         }

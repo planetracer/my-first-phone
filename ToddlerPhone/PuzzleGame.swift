@@ -26,25 +26,19 @@ struct PuzzlePicture: Identifiable {
 
 /// How many pieces the picture is cut into.
 enum PuzzleLevel: Int, CaseIterable, Identifiable {
-    case four = 4, six = 6, nine = 9
+    case four = 4, nine = 9, sixteen = 16
 
     var id: Int { rawValue }
 
     var cols: Int {
         switch self {
         case .four: return 2
-        case .six: return 3
         case .nine: return 3
+        case .sixteen: return 4
         }
     }
 
-    var rows: Int {
-        switch self {
-        case .four: return 2
-        case .six: return 2
-        case .nine: return 3
-        }
-    }
+    var rows: Int { cols }
 
     var count: Int { cols * rows }
     var title: String { "\(count) pieces" }
@@ -52,9 +46,117 @@ enum PuzzleLevel: Int, CaseIterable, Identifiable {
     var tint: Color {
         switch self {
         case .four: return Palette.green
-        case .six: return Palette.blue
-        case .nine: return Palette.purple
+        case .nine: return Palette.blue
+        case .sixteen: return Palette.purple
         }
+    }
+}
+
+// MARK: - Piece shape
+//
+// Every piece is cut with real jigsaw edges: a round knob on one side of a cut
+// and a matching socket on the other. Neighbouring pieces share a cut, so the
+// knobs and sockets always fit together.
+
+/// Shared numbers for the cut shape, so the board, the pieces and the tray all
+/// agree on how far a knob reaches past the edge of a cell.
+enum JigsawLook {
+    /// One knob, as a fraction of the cell.
+    static let overhang: CGFloat = 0.22
+    /// How wide a padded piece is compared with its cell.
+    static var boxScale: CGFloat { 1 + 2 * overhang }
+}
+
+/// Which way each of the four edges of a piece bends.
+/// 0 is a flat outside edge, 1 is a knob sticking out, -1 is a socket.
+struct JigsawEdges: Equatable {
+    var top: CGFloat = 0
+    var right: CGFloat = 0
+    var bottom: CGFloat = 0
+    var left: CGFloat = 0
+}
+
+/// A single jigsaw piece outline. The rect it is handed is the cell plus room
+/// for the knobs on all four sides, so `overhang` is the fraction of the cell
+/// taken up by one knob.
+struct JigsawPieceShape: Shape {
+    let edges: JigsawEdges
+    var overhang: CGFloat = JigsawLook.overhang
+
+    func path(in rect: CGRect) -> Path {
+        let cell = rect.width / (1 + 2 * overhang)
+        let inset = cell * overhang
+        let core = CGRect(x: rect.minX + inset, y: rect.minY + inset, width: cell, height: cell)
+
+        var path = Path()
+        path.move(to: CGPoint(x: core.minX, y: core.minY))
+        edge(&path, from: CGPoint(x: core.minX, y: core.minY),
+             to: CGPoint(x: core.maxX, y: core.minY), tab: edges.top)
+        edge(&path, from: CGPoint(x: core.maxX, y: core.minY),
+             to: CGPoint(x: core.maxX, y: core.maxY), tab: edges.right)
+        edge(&path, from: CGPoint(x: core.maxX, y: core.maxY),
+             to: CGPoint(x: core.minX, y: core.maxY), tab: edges.bottom)
+        edge(&path, from: CGPoint(x: core.minX, y: core.maxY),
+             to: CGPoint(x: core.minX, y: core.minY), tab: edges.left)
+        path.closeSubpath()
+        return path
+    }
+
+    /// One side of a piece. The cell is walked clockwise, so the outward
+    /// direction is the normal turned a quarter turn the other way.
+    private func edge(_ path: inout Path, from a: CGPoint, to b: CGPoint, tab: CGFloat) {
+        guard tab != 0 else {
+            path.addLine(to: b)
+            return
+        }
+        let dx = b.x - a.x
+        let dy = b.y - a.y
+        let len = hypot(dx, dy)
+        guard len > 0 else { return }
+        let ux = dx / len, uy = dy / len        // along the edge
+        let nx = uy, ny = -ux                   // out of the piece
+
+        func at(_ along: CGFloat, _ out: CGFloat) -> CGPoint {
+            CGPoint(
+                x: a.x + ux * along * len + nx * out * len * tab,
+                y: a.y + uy * along * len + ny * out * len * tab
+            )
+        }
+
+        // Shoulder, a narrow neck, then the round head of the knob.
+        path.addLine(to: at(0.37, 0))
+        path.addCurve(to: at(0.42, 0.10),
+                      control1: at(0.41, 0.00), control2: at(0.39, 0.08))
+        path.addCurve(to: at(0.58, 0.10),
+                      control1: at(0.27, 0.27), control2: at(0.73, 0.27))
+        path.addCurve(to: at(0.63, 0.00),
+                      control1: at(0.61, 0.08), control2: at(0.59, 0.00))
+        path.addLine(to: b)
+    }
+}
+
+/// The cuts for one puzzle. Each inside cut is flipped at random, so the same
+/// picture is cut a different way every time.
+struct JigsawCuts {
+    let rows: Int
+    let cols: Int
+    private let across: [[Bool]]   // (rows + 1) x cols, cuts between stacked pieces
+    private let down: [[Bool]]     // rows x (cols + 1), cuts between side by side pieces
+
+    init(rows: Int, cols: Int) {
+        self.rows = rows
+        self.cols = cols
+        across = (0...rows).map { _ in (0..<cols).map { _ in Bool.random() } }
+        down = (0..<rows).map { _ in (0...cols).map { _ in Bool.random() } }
+    }
+
+    func edges(row: Int, col: Int) -> JigsawEdges {
+        JigsawEdges(
+            top: row == 0 ? 0 : (across[row][col] ? 1 : -1),
+            right: col == cols - 1 ? 0 : (down[row][col + 1] ? -1 : 1),
+            bottom: row == rows - 1 ? 0 : (across[row + 1][col] ? -1 : 1),
+            left: col == 0 ? 0 : (down[row][col] ? 1 : -1)
+        )
     }
 }
 
@@ -81,6 +183,8 @@ private struct PuzzleMetrics {
     var boardWidth: CGFloat { pieceSize * CGFloat(cols) }
     var boardHeight: CGFloat { pieceSize * CGFloat(rows) }
     var thumbScale: CGFloat { pieceSize > 0 ? thumb / pieceSize : 1 }
+    /// Middle to middle spacing in the tray, with room for the knobs.
+    var trayStep: CGFloat { thumb * JigsawLook.boxScale + 6 }
 
     var boardCenter: CGPoint {
         CGPoint(x: boardOrigin.x + boardWidth / 2, y: boardOrigin.y + boardHeight / 2)
@@ -97,11 +201,11 @@ private struct PuzzleMetrics {
         let row = index / perRow
         let col = index % perRow
         let inRow = min(perRow, count - row * perRow)
-        let rowWidth = CGFloat(inRow) * (thumb + 12) - 12
-        let startX = (width - rowWidth) / 2 + thumb / 2
+        let rowWidth = CGFloat(inRow) * trayStep - 6
+        let startX = (width - rowWidth) / 2 + trayStep / 2
         return CGPoint(
-            x: startX + CGFloat(col) * (thumb + 12),
-            y: trayTop + 20 + thumb / 2 + CGFloat(row) * (thumb + 14)
+            x: startX + CGFloat(col) * trayStep,
+            y: trayTop + 16 + trayStep / 2 + CGFloat(row) * trayStep
         )
     }
 }
@@ -115,12 +219,11 @@ struct PuzzleView: View {
     @State private var pictureIndex = 0
     @State private var level: PuzzleLevel = .four
     @State private var pieces: [PuzzlePiece] = []
+    @State private var cuts = JigsawCuts(rows: 2, cols: 2)
     @State private var dragging: Int?
     @State private var dragPoint: CGPoint = .zero
     @State private var showWin = false
     @State private var celebrate = false
-
-    private static let snapDistance: CGFloat = 44
 
     private var picture: PuzzlePicture { PuzzlePicture.all[pictureIndex] }
     private var solved: Bool { !pieces.isEmpty && pieces.allSatisfy { $0.placed } }
@@ -246,21 +349,19 @@ struct PuzzleView: View {
     // MARK: Board
 
     private func boardBackdrop(_ metrics: PuzzleMetrics) -> some View {
+        // An empty board. No faded picture underneath, so the only clue is the
+        // shape of the hole and the picture on the piece itself.
         ZStack {
-            if let image = picture.image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: metrics.boardWidth, height: metrics.boardHeight)
-                    .clipped()
-                    .opacity(0.16)
-            }
-
             ForEach(0..<metrics.rows, id: \.self) { row in
                 ForEach(0..<metrics.cols, id: \.self) { col in
-                    RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(Palette.inkSoft.opacity(0.35), style: StrokeStyle(lineWidth: 2, dash: [7, 6]))
-                        .frame(width: metrics.pieceSize - 4, height: metrics.pieceSize - 4)
+                    let box = metrics.pieceSize * (1 + 2 * JigsawLook.overhang)
+                    JigsawPieceShape(edges: cuts.edges(row: row, col: col))
+                        .fill(Palette.field.opacity(0.55))
+                        .overlay(
+                            JigsawPieceShape(edges: cuts.edges(row: row, col: col))
+                                .stroke(Palette.inkSoft.opacity(0.30), lineWidth: 1.6)
+                        )
+                        .frame(width: box, height: box)
                         .position(
                             x: (CGFloat(col) + 0.5) * metrics.pieceSize,
                             y: (CGFloat(row) + 0.5) * metrics.pieceSize
@@ -269,7 +370,12 @@ struct PuzzleView: View {
             }
         }
         .frame(width: metrics.boardWidth, height: metrics.boardHeight)
-        .background(Palette.card.opacity(0.7), in: RoundedRectangle(cornerRadius: 14))
+        .background(
+            RoundedRectangle(cornerRadius: 18)
+                .fill(Palette.card.opacity(0.9))
+                .shadow(color: .black.opacity(0.05), radius: 8, y: 3)
+                .padding(-10)
+        )
         .position(metrics.boardCenter)
         .allowsHitTesting(false)
     }
@@ -345,9 +451,12 @@ struct PuzzleView: View {
     private func pieceArt(_ piece: PuzzlePiece, size: CGFloat) -> some View {
         let boardWidth = size * CGFloat(level.cols)
         let boardHeight = size * CGFloat(level.rows)
+        let inset = size * JigsawLook.overhang
+        let box = size + inset * 2
+        let shape = JigsawPieceShape(edges: cuts.edges(row: piece.row, col: piece.col))
 
         return Color.clear
-            .frame(width: size, height: size)
+            .frame(width: box, height: box)
             .overlay(alignment: .topLeading) {
                 Group {
                     if let image = picture.image {
@@ -360,13 +469,26 @@ struct PuzzleView: View {
                         Palette.field.frame(width: boardWidth, height: boardHeight)
                     }
                 }
-                .offset(x: -CGFloat(piece.col) * size, y: -CGFloat(piece.row) * size)
+                // Slide the whole picture so this piece's patch sits in the box,
+                // with the knobs reaching into the neighbouring patches.
+                .offset(
+                    x: -CGFloat(piece.col) * size + inset,
+                    y: -CGFloat(piece.row) * size + inset
+                )
             }
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .clipShape(shape)
             .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(.white.opacity(piece.placed ? 0.35 : 0.95), lineWidth: piece.placed ? 1 : 3)
+                shape.stroke(
+                    piece.placed ? .white.opacity(0.45) : .white.opacity(0.95),
+                    lineWidth: piece.placed ? 1 : 2.5
+                )
             )
+            .overlay(
+                shape.stroke(Palette.ink.opacity(piece.placed ? 0.05 : 0.14), lineWidth: 1)
+            )
+            // Only the piece itself takes the drag, not the empty corners of
+            // the box around it.
+            .contentShape(shape)
     }
 
     // MARK: Actions
@@ -375,7 +497,7 @@ struct PuzzleView: View {
         let slot = metrics.slotCenter(row: piece.row, col: piece.col)
         let distance = hypot(point.x - slot.x, point.y - slot.y)
 
-        if distance <= Self.snapDistance {
+        if distance <= metrics.pieceSize * 0.46 {
             Sfx.pop()
             Sfx.bump(.medium)
             withAnimation(.spring(response: 0.3, dampingFraction: 0.62)) {
@@ -408,6 +530,7 @@ struct PuzzleView: View {
         dragging = nil
         showWin = false
         celebrate = false
+        cuts = JigsawCuts(rows: level.rows, cols: level.cols)
         let order = Array(0..<level.count).shuffled()
         pieces = (0..<level.count).map { index in
             PuzzlePiece(
@@ -423,10 +546,11 @@ struct PuzzleView: View {
 
     private func metrics(for size: CGSize) -> PuzzleMetrics {
         let count = level.count
-        let perRow = count <= 4 ? count : (count <= 6 ? 3 : 5)
-        let thumb = min(66, max(40, (size.width - 20) / CGFloat(perRow) - 14))
+        let perRow = count <= 4 ? count : (count <= 9 ? 5 : 6)
+        let thumb = min(62, max(32, (size.width - 20) / (CGFloat(perRow) * JigsawLook.boxScale) - 6))
         let trayRows = Int(ceil(Double(count) / Double(perRow)))
-        let trayHeight = CGFloat(trayRows) * (thumb + 14) + 26
+        let trayStep = thumb * JigsawLook.boxScale + 6
+        let trayHeight = CGFloat(trayRows) * trayStep + 22
         let boardArea = max(120, size.height - trayHeight - 10)
         let pieceSize = max(
             40,
