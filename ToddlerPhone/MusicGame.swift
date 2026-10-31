@@ -328,6 +328,8 @@ struct MusicView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var instrument: MusicInstrument = .xylophone
+    /// The last instrument that can carry a tune, so Songs goes back to it.
+    @State private var lastMelodic: MusicInstrument = .xylophone
     @State private var songMode = false
     @State private var songIndex = 0
     @State private var step = 0
@@ -417,6 +419,7 @@ struct MusicView: View {
                     Sfx.tap()
                     Sfx.bump(.light)
                     instrument = item
+                    if item.isMelodic { lastMelodic = item }
                     if songMode && !item.isMelodic { songMode = false }
                     step = 0
                     showWin = false
@@ -449,7 +452,9 @@ struct MusicView: View {
                 showWin = false
             }
             modeChip(title: "Songs", on: songMode) {
-                if !instrument.isMelodic { instrument = .xylophone }
+                // Drums cannot play a tune, so fall back to whichever melodic
+                // instrument was last in use rather than always the xylophone.
+                if !instrument.isMelodic { instrument = lastMelodic }
                 songMode = true
                 step = 0
                 showWin = false
@@ -464,12 +469,20 @@ struct MusicView: View {
             Sfx.bump(.light)
             action()
         } label: {
-            Text(title)
-                .font(.rounded(17, weight: .bold))
-                .foregroundStyle(on ? .white : Palette.inkSoft)
-                .frame(maxWidth: .infinity)
-                .frame(height: 46)
-                .background(on ? Palette.green : Palette.field, in: Capsule())
+            HStack(spacing: 7) {
+                Image(systemName: on ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 15, weight: .bold))
+                Text(title)
+                    .font(.rounded(17, weight: .bold))
+            }
+            .foregroundStyle(on ? .white : Palette.ink)
+            .frame(maxWidth: .infinity)
+            .frame(height: 48)
+            .background(on ? Palette.purple : Palette.card, in: Capsule())
+            .overlay(
+                Capsule().stroke(on ? .clear : Palette.ink.opacity(0.10), lineWidth: 1.5)
+            )
+            .shadow(color: .black.opacity(on ? 0.12 : 0.05), radius: on ? 8 : 5, y: 2)
         }
         .buttonStyle(BouncyButtonStyle())
     }
@@ -856,13 +869,25 @@ private struct MusicKeyLook: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .scaleEffect(pressed ? 0.94 : (target && pulse ? 1.04 : 1))
-            .shadow(color: color.opacity(pressed ? 0.75 : (target ? 0.45 : 0)), radius: pressed ? 16 : 12)
+            .scaleEffect(pressed ? 0.94 : (target && pulse ? 1.07 : 1))
+            .shadow(color: color.opacity(pressed ? 0.75 : (target ? 0.55 : 0)), radius: pressed ? 16 : 14)
             .overlay {
                 if target {
-                    RoundedRectangle(cornerRadius: corner, style: .continuous)
-                        .stroke(Palette.ink.opacity(0.22), lineWidth: 4)
-                        .opacity(pulse ? 0.9 : 0.35)
+                    // A bright ring and a finger, so a two year old can see
+                    // which one to hit next without being told.
+                    ZStack {
+                        RoundedRectangle(cornerRadius: corner, style: .continuous)
+                            .stroke(.white, lineWidth: 6)
+                        RoundedRectangle(cornerRadius: corner, style: .continuous)
+                            .stroke(Palette.ink.opacity(0.35), lineWidth: 2)
+                        Image(systemName: "hand.point.up.left.fill")
+                            .font(.system(size: 26, weight: .black))
+                            .foregroundStyle(.white)
+                            .shadow(color: .black.opacity(0.35), radius: 4, y: 2)
+                            .scaleEffect(pulse ? 1.12 : 0.92)
+                            .offset(y: pulse ? 2 : -4)
+                    }
+                    .opacity(pulse ? 1 : 0.75)
                 }
             }
             .animation(.spring(response: 0.22, dampingFraction: 0.6), value: pressed)

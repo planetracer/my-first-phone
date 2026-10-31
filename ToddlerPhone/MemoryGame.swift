@@ -143,8 +143,6 @@ struct MemoryMatchView: View {
         CardFace(symbol: "bird.fill", photo: "photo-duck.jpg", sound: "duck", color: Palette.yellow, name: "duck"),
         CardFace(symbol: "hare.fill", photo: "photo-horse.jpg", sound: "horse", color: Palette.red, name: "horse"),
         CardFace(symbol: "pawprint.fill", photo: "photo-sheep.jpg", sound: "sheep", color: Palette.green, name: "sheep"),
-        CardFace(symbol: "car.fill", photo: "photo-car.jpg", sound: "car", color: Palette.blue, name: "car"),
-        CardFace(symbol: "tram.fill", photo: "photo-train.jpg", sound: "train", color: Palette.purple, name: "train"),
     ]
 
     static let matchCheers = [
@@ -460,7 +458,9 @@ struct MemoryMatchView: View {
 
     private func startGame() {
         var deck: [MemoryCard] = []
-        let picks = Array(faces.indices.shuffled().prefix(level.pairs))
+        // The photo deck is smaller than the symbol one, so a level never asks
+        // for more pairs than there are pictures.
+        let picks = Array(faces.indices.shuffled().prefix(min(level.pairs, faces.count)))
         for face in picks {
             deck.append(MemoryCard(face: face))
             deck.append(MemoryCard(face: face))
@@ -623,13 +623,14 @@ private struct CardView: View {
     @ViewBuilder
     private var faceArt: some View {
         if let photo = face.photo, let image = UIImage(named: photo) ?? UIImage(named: face.name) {
+            // One square for every picture, whatever shape the photo is, so
+            // the cards all look the same.
+            let side = height - 16
             Image(uiImage: image)
                 .resizable()
                 .aspectRatio(contentMode: .fill)
-                .frame(maxWidth: .infinity)
-                .frame(height: height - 12)
+                .frame(width: side, height: side)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
-                .padding(6)
         } else {
             Image(systemName: face.symbol)
                 .font(.system(size: height > 100 ? 40 : 34, weight: .semibold))

@@ -870,8 +870,14 @@ struct ChefChopStation: View {
                                 .offset(x: 16 + rightDrift.width, y: rightDrift.height)
                         }
                     } else {
-                        ChefIngredientView(ingredient: current)
-                            .frame(width: 130, height: 130)
+                        ZStack {
+                            ChefIngredientView(ingredient: current)
+                                .frame(width: 130, height: 130)
+                            // The line to swipe along, with an arrow at each end.
+                            ChefCutGuide()
+                                .frame(width: 190, height: 130)
+                                .allowsHitTesting(false)
+                        }
                     }
 
                     ForEach(bits) { bit in
@@ -973,7 +979,7 @@ struct ChefScatterBit: View {
     @State private var out = false
 
     var body: some View {
-        ChefHalfIngredient(ingredient: ingredient, leftSide: true)
+        ChefChoppedIngredient(ingredient: ingredient)
             .frame(width: bit.size, height: bit.size)
             .rotationEffect(.degrees(out ? bit.spin : 0))
             .offset(
@@ -999,6 +1005,8 @@ struct ChefStirStation: View {
     @State private var sinceSound: CGFloat = 0
     @State private var stirring = false
     @State private var finished = false
+    /// Where the ladle is sitting on its circle, so it follows the finger.
+    @State private var ladleAngle: CGFloat = -.pi / 2
 
     private let target: CGFloat = .pi * 6
 
@@ -1032,14 +1040,28 @@ struct ChefStirStation: View {
                     .allowsHitTesting(false)
                 }
 
-                potView
-
-                if progress >= 1 {
-                    ChefLadle()
-                        .position(x: geo.size.width / 2 + 86, y: geo.size.height * 0.5 - 6)
-                        .transition(.scale.combined(with: .opacity))
+                // A dashed ring showing the way round, until the stirring starts.
+                if !stirring && progress < 1 {
+                    Circle()
+                        .strokeBorder(
+                            Palette.card.opacity(0.55),
+                            style: StrokeStyle(lineWidth: 5, lineCap: .round, dash: [10, 12])
+                        )
+                        .frame(width: 128, height: 128)
+                        .position(center)
                         .allowsHitTesting(false)
                 }
+
+                potView
+
+                // The ladle rides round the pot with the child's finger.
+                ChefLadle()
+                    .rotationEffect(.radians(Double(ladleAngle) + .pi / 2))
+                    .position(
+                        x: center.x + cos(ladleAngle) * 46,
+                        y: center.y + sin(ladleAngle) * 30 - 10
+                    )
+                    .allowsHitTesting(false)
 
                 ChefProgressRing(progress: progress, color: Palette.orange)
                     .frame(width: 46, height: 46)
@@ -1079,7 +1101,7 @@ struct ChefStirStation: View {
                         }
                         HStack(spacing: -6) {
                             ForEach(dish.ingredients) { item in
-                                ChefHalfIngredient(ingredient: item, leftSide: true)
+                                ChefChoppedIngredient(ingredient: item)
                                     .frame(width: 34, height: 34)
                             }
                         }
@@ -1091,6 +1113,9 @@ struct ChefStirStation: View {
 
     private func stir(at point: CGPoint, center: CGPoint) {
         let angle = atan2(point.y - center.y, point.x - center.x)
+        withAnimation(.interactiveSpring(response: 0.18, dampingFraction: 0.8)) {
+            ladleAngle = angle
+        }
         if let last = lastAngle {
             var delta = angle - last
             if delta > .pi { delta -= 2 * .pi }
@@ -1253,7 +1278,7 @@ struct ChefPanFood: View {
             }
             HStack(spacing: -4) {
                 ForEach(dish.ingredients) { item in
-                    ChefHalfIngredient(ingredient: item, leftSide: true)
+                    ChefChoppedIngredient(ingredient: item)
                         .frame(width: 26, height: 26)
                 }
             }
@@ -1658,7 +1683,7 @@ struct ChefPlatedDish: View {
                 .position(x: w / 2, y: h * 0.57)
             HStack(spacing: -w * 0.02) {
                 ForEach(dish.ingredients) { item in
-                    ChefHalfIngredient(ingredient: item, leftSide: true)
+                    ChefChoppedIngredient(ingredient: item)
                         .frame(width: w * 0.15, height: w * 0.15)
                 }
             }
@@ -1679,7 +1704,7 @@ struct ChefPlatedDish: View {
                 .position(x: w / 2, y: h * 0.58)
             HStack(spacing: -w * 0.02) {
                 ForEach(Array(dish.ingredients.enumerated()), id: \.offset) { index, item in
-                    ChefHalfIngredient(ingredient: item, leftSide: index.isMultiple(of: 2))
+                    ChefChoppedIngredient(ingredient: item, tilt: index.isMultiple(of: 2) ? -14 : 12)
                         .frame(width: w * 0.19, height: w * 0.19)
                         .rotationEffect(.degrees(Double(index) * 12 - 14))
                 }
@@ -1771,7 +1796,7 @@ struct ChefPlatedDish: View {
                 .frame(width: w * 0.42, height: w * 0.3)
             HStack(spacing: -w * 0.01) {
                 ForEach(dish.ingredients) { item in
-                    ChefHalfIngredient(ingredient: item, leftSide: true)
+                    ChefChoppedIngredient(ingredient: item)
                         .frame(width: w * 0.11, height: w * 0.11)
                 }
             }
@@ -1989,6 +2014,20 @@ struct ChefParsleyFleck: View {
 }
 
 /// One half of an ingredient, masked to the left or right side.
+/// A piece of a chopped ingredient as it looks on the plate. Half of a small
+/// icon came out as a sliver — broccoli was a green line — so a serving is a
+/// whole little piece, tipped over as if it had been tossed into the dish.
+struct ChefChoppedIngredient: View {
+    let ingredient: ChefIngredient
+    var tilt: Double = -12
+
+    var body: some View {
+        ChefIngredientView(ingredient: ingredient)
+            .rotationEffect(.degrees(tilt))
+            .shadow(color: .black.opacity(0.10), radius: 2, y: 1)
+    }
+}
+
 struct ChefHalfIngredient: View {
     let ingredient: ChefIngredient
     let leftSide: Bool
@@ -2003,6 +2042,46 @@ struct ChefHalfIngredient: View {
                         .frame(width: s / 2)
                         .frame(maxWidth: .infinity, alignment: leftSide ? .leading : .trailing)
                 )
+        }
+    }
+}
+
+/// The dashed line across an ingredient showing where to cut, with a little
+/// arrow at each end so it reads as "swipe across here".
+struct ChefCutGuide: View {
+    @State private var swing = false
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            let h = geo.size.height
+            ZStack {
+                Path { path in
+                    path.move(to: CGPoint(x: w * 0.06, y: h / 2))
+                    path.addLine(to: CGPoint(x: w * 0.94, y: h / 2))
+                }
+                .stroke(
+                    .white.opacity(0.95),
+                    style: StrokeStyle(lineWidth: 4, lineCap: .round, dash: [9, 9])
+                )
+                .shadow(color: .black.opacity(0.25), radius: 2)
+
+                HStack {
+                    Image(systemName: "arrow.left")
+                    Spacer()
+                    Image(systemName: "arrow.right")
+                }
+                .font(.system(size: 17, weight: .black))
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.3), radius: 2)
+                .frame(width: w * 0.98, height: h)
+                .offset(x: swing ? 5 : -5)
+            }
+        }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                swing = true
+            }
         }
     }
 }

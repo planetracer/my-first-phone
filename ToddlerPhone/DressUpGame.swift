@@ -1460,8 +1460,8 @@ struct CharacterView: View {
                 VStack(spacing: 0) {
                     Capsule()
                         .fill(DressInk.line.opacity(0.18))
-                        .frame(width: m.torsoW * 0.66, height: m.lw * 1.6)
-                        .offset(y: height * 0.08)
+                        .frame(width: m.torsoW * 0.62, height: m.lw * 1.6)
+                        .offset(y: height * 0.24)
                     Spacer(minLength: 0)
                 }
                 .frame(height: height)
@@ -1579,17 +1579,19 @@ struct CharacterView: View {
         }
 
         if outfit.extra == 3 {
+            // Hung from the neck: the ends of the chain meet the collar and
+            // the pendant drops just below it, whatever the top is.
             ZStack {
                 Circle()
-                    .trim(from: 0.08, to: 0.42)
-                    .stroke(Palette.yellow, style: StrokeStyle(lineWidth: m.lw * 1.6, lineCap: .round))
-                    .frame(width: m.headD * 0.52, height: m.headD * 0.40)
+                    .trim(from: 0.06, to: 0.44)
+                    .stroke(Palette.yellow, style: StrokeStyle(lineWidth: m.lw * 1.5, lineCap: .round))
+                    .frame(width: m.headD * 0.46, height: m.headD * 0.34)
                 Circle()
                     .inked(Palette.pink, m.lw * 0.7)
-                    .frame(width: m.headD * 0.13)
-                    .offset(y: m.headD * 0.22)
+                    .frame(width: m.headD * 0.12)
+                    .offset(y: m.headD * 0.19)
             }
-            .position(x: m.cx, y: m.torsoTop + m.headD * 0.04)
+            .position(x: m.cx, y: m.torsoTop - m.headD * 0.01)
         }
 
         if outfit.extra == 4 {
