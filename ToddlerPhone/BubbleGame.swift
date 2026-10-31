@@ -125,10 +125,30 @@ struct BubbleView: View {
                 startPoint: .top, endPoint: .bottom
             )
 
-            Circle()
-                .fill(Palette.yellow.opacity(0.28))
-                .frame(width: 150, height: 150)
-                .offset(x: 110, y: -240)
+            // A warm sun with a soft halo. A flat yellow disc over blue sky
+            // just came out a muddy khaki.
+            ZStack {
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [Palette.yellow.opacity(0.28), Palette.yellow.opacity(0)],
+                            center: .center, startRadius: 40, endRadius: 150
+                        )
+                    )
+                    .frame(width: 300, height: 300)
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [
+                                Color(red: 1.0, green: 0.97, blue: 0.80),
+                                Color(red: 0.99, green: 0.84, blue: 0.42),
+                            ],
+                            center: UnitPoint(x: 0.38, y: 0.34), startRadius: 4, endRadius: 90
+                        )
+                    )
+                    .frame(width: 140, height: 140)
+            }
+            .offset(x: 110, y: -240)
 
             cloud(width: 150).offset(x: -90, y: -160)
             cloud(width: 110).offset(x: 120, y: -40)

@@ -1020,13 +1020,85 @@ struct ExtraPreview: View {
 enum DressInk {
     static let line = Color(red: 0.27, green: 0.23, blue: 0.28)
     static let soft = Color(red: 0.27, green: 0.23, blue: 0.28).opacity(0.22)
+
+    /// A hint of light from above and shadow underneath. Every part of the
+    /// character gets it, which is what stops the flat shapes reading like
+    /// cut out card.
+    static let shading = LinearGradient(
+        colors: [.white.opacity(0.17), .white.opacity(0.03), .clear, .black.opacity(0.10)],
+        startPoint: .top,
+        endPoint: .bottom
+    )
 }
 
 extension Shape {
-    /// Flat fill plus the character outline.
+    /// Fill, a soft round of shading, then the character outline.
     func inked(_ color: Color, _ width: CGFloat, opacity: Double = 0.85) -> some View {
         self.fill(color)
+            .overlay(self.fill(DressInk.shading))
             .overlay(self.stroke(DressInk.line.opacity(opacity), lineWidth: width))
+    }
+}
+
+/// An arm or a leg: fuller at the shoulder or hip and a little narrower at the
+/// wrist or ankle. Plain capsules read as broom handles.
+struct LimbShape: Shape {
+    /// Width at the bottom as a fraction of the width at the top.
+    var taper: CGFloat = 0.84
+
+    func path(in r: CGRect) -> Path {
+        let topR = r.width / 2
+        let botR = max(1, r.width * taper / 2)
+        var path = Path()
+        path.move(to: CGPoint(x: r.midX - topR, y: r.minY + topR))
+        path.addArc(
+            center: CGPoint(x: r.midX, y: r.minY + topR), radius: topR,
+            startAngle: .degrees(180), endAngle: .degrees(0), clockwise: false
+        )
+        path.addLine(to: CGPoint(x: r.midX + botR, y: r.maxY - botR))
+        path.addArc(
+            center: CGPoint(x: r.midX, y: r.maxY - botR), radius: botR,
+            startAngle: .degrees(0), endAngle: .degrees(180), clockwise: false
+        )
+        path.closeSubpath()
+        return path
+    }
+}
+
+/// A head: round at the top, a touch narrower at the chin.
+struct HeadShape: Shape {
+    func path(in r: CGRect) -> Path {
+        let w = r.width
+        let h = r.height
+        let cx = r.midX
+        let top = r.minY
+        let bottom = r.maxY
+        let temple = top + h * 0.46
+
+        var path = Path()
+        path.move(to: CGPoint(x: cx, y: top))
+        path.addCurve(
+            to: CGPoint(x: r.maxX, y: temple),
+            control1: CGPoint(x: cx + w * 0.30, y: top),
+            control2: CGPoint(x: r.maxX, y: top + h * 0.17)
+        )
+        path.addCurve(
+            to: CGPoint(x: cx, y: bottom),
+            control1: CGPoint(x: r.maxX, y: bottom - h * 0.22),
+            control2: CGPoint(x: cx + w * 0.30, y: bottom)
+        )
+        path.addCurve(
+            to: CGPoint(x: r.minX, y: temple),
+            control1: CGPoint(x: cx - w * 0.30, y: bottom),
+            control2: CGPoint(x: r.minX, y: bottom - h * 0.22)
+        )
+        path.addCurve(
+            to: CGPoint(x: cx, y: top),
+            control1: CGPoint(x: r.minX, y: top + h * 0.17),
+            control2: CGPoint(x: cx - w * 0.30, y: top)
+        )
+        path.closeSubpath()
+        return path
     }
 }
 
@@ -1050,15 +1122,16 @@ struct DressMetrics {
     init(_ size: CGSize) {
         w = size.width
         h = size.height
-        headD = min(h * 0.255, w * 0.56)
+        headD = min(h * 0.248, w * 0.55)
         cx = size.width / 2
         // Low enough that tall hats and bunny ears stay on the canvas.
-        headY = h * 0.255
-        torsoTop = headY + headD * 0.42
-        torsoH = h * 0.280
+        headY = h * 0.250
+        // Far enough below the chin to leave a glimpse of neck.
+        torsoTop = headY + headD * 0.60
+        torsoH = h * 0.260
         torsoW = headD * 1.06
         hipY = torsoTop + torsoH
-        legH = h * 0.170
+        legH = h * 0.162
         legW = headD * 0.26
         legGap = headD * 0.16
         footY = hipY + legH
@@ -1070,9 +1143,9 @@ struct DressMetrics {
 
     var armW: CGFloat { headD * 0.21 }
     var armL: CGFloat { torsoH * 0.95 }
-    var shoulderY: CGFloat { torsoTop + torsoH * 0.05 }
+    var shoulderY: CGFloat { torsoTop + torsoH * 0.03 }
     /// Arms hang just clear of the body so they are always visible.
-    func shoulderX(_ side: CGFloat) -> CGFloat { cx + side * (torsoW * 0.5 - armW * 0.20) }
+    func shoulderX(_ side: CGFloat) -> CGFloat { cx + side * (torsoW * 0.5 - armW * 0.30) }
     /// How far the arms swing away from the body.
     static let armAngle: Double = 16
     /// Where the hand ends up once the arm is swung out.
@@ -1112,8 +1185,8 @@ struct DressBodyShape: Shape {
         )
         path.addCurve(
             to: CGPoint(x: cx + hw / 2, y: bottom - r.height * 0.14),
-            control1: CGPoint(x: cx + sw * 0.58, y: top + r.height * 0.45),
-            control2: CGPoint(x: cx + hw * 0.52, y: bottom - r.height * 0.38)
+            control1: CGPoint(x: cx + sw * 0.52, y: top + r.height * 0.42),
+            control2: CGPoint(x: cx + hw * 0.50, y: bottom - r.height * 0.34)
         )
         path.addQuadCurve(
             to: CGPoint(x: cx, y: bottom),
@@ -1125,8 +1198,8 @@ struct DressBodyShape: Shape {
         )
         path.addCurve(
             to: CGPoint(x: cx - sw / 2, y: top + shoulderDrop),
-            control1: CGPoint(x: cx - hw * 0.52, y: bottom - r.height * 0.38),
-            control2: CGPoint(x: cx - sw * 0.58, y: top + r.height * 0.45)
+            control1: CGPoint(x: cx - hw * 0.50, y: bottom - r.height * 0.34),
+            control2: CGPoint(x: cx - sw * 0.52, y: top + r.height * 0.42)
         )
         path.closeSubpath()
         return path
@@ -1191,7 +1264,7 @@ struct CharacterView: View {
 
         ZStack {
             ForEach([-1.0, 1.0], id: \.self) { side in
-                Capsule()
+                LimbShape(taper: 0.86)
                     .inked(legColor, m.lw)
                     .frame(width: m.legW, height: legH)
                     .position(x: m.legX(CGFloat(side)), y: m.hipY + legH / 2 - m.headD * 0.10)
@@ -1292,16 +1365,16 @@ struct CharacterView: View {
         }()
 
         ZStack(alignment: .top) {
-            Capsule()
+            LimbShape(taper: 0.80)
                 .inked(outfit.skinColor, m.lw)
                 .frame(width: armW, height: armL)
-            Capsule()
+            LimbShape(taper: 0.88)
                 .inked(sleeveColor, m.lw)
                 .frame(width: armW * 1.16, height: sleeve)
-            Circle()
+            Ellipse()
                 .inked(outfit.skinColor, m.lw)
-                .frame(width: handD, height: handD)
-                .offset(y: armL - handD * 0.78)
+                .frame(width: handD, height: handD * 1.08)
+                .offset(y: armL - handD * 0.76)
         }
         .frame(width: armW * 1.3, height: armL + handD * 0.3, alignment: .top)
         .rotationEffect(.degrees(-Double(side) * DressMetrics.armAngle), anchor: .top)
@@ -1315,10 +1388,10 @@ struct CharacterView: View {
 
     @ViewBuilder
     private func neck(_ m: DressMetrics) -> some View {
-        Capsule()
+        LimbShape(taper: 1.18)
             .inked(outfit.skinColor, m.lw)
-            .frame(width: m.headD * 0.30, height: m.headD * 0.34)
-            .position(x: m.cx, y: m.headY + m.headD * 0.46)
+            .frame(width: m.headD * 0.27, height: m.headD * 0.40)
+            .position(x: m.cx, y: m.headY + m.headD * 0.50)
     }
 
     @ViewBuilder
@@ -1361,7 +1434,7 @@ struct CharacterView: View {
 
     @ViewBuilder
     private func plainBody(_ m: DressMetrics) -> some View {
-        let shape = DressBodyShape()
+        let shape = DressBodyShape(shoulder: 0.86, hip: 0.96)
         shape
             .inked(outfit.topShade, m.lw)
             .frame(width: m.torsoW, height: m.torsoH)
@@ -1421,7 +1494,7 @@ struct CharacterView: View {
 
     @ViewBuilder
     private func stripedBody(_ m: DressMetrics) -> some View {
-        let shape = DressBodyShape()
+        let shape = DressBodyShape(shoulder: 0.86, hip: 0.96)
         shape
             .inked(outfit.topShade, m.lw)
             .frame(width: m.torsoW, height: m.torsoH)
@@ -1442,7 +1515,7 @@ struct CharacterView: View {
 
     @ViewBuilder
     private func overallsBody(_ m: DressMetrics) -> some View {
-        let shape = DressBodyShape()
+        let shape = DressBodyShape(shoulder: 0.86, hip: 0.96)
         ZStack {
             // White tee underneath.
             shape
@@ -1581,9 +1654,9 @@ struct DressHead: View {
             if !isHijab { earsView }
 
             // The head itself.
-            Circle()
+            HeadShape()
                 .inked(outfit.skinColor, lw)
-                .frame(width: head, height: head)
+                .frame(width: head, height: head * 1.04)
 
             if kind.isAnimal { muzzleView }
             if !isHijab && !kind.isAnimal { hairView }
@@ -1595,9 +1668,10 @@ struct DressHead: View {
             }
             .offset(y: head * 0.14)
 
+            if !blinking { browsView }
             eyesView
+            noseView
             mouthView
-            if kind.isAnimal { noseView }
             if outfit.extra == 1 { glassesView }
             headwearView
         }
@@ -1704,7 +1778,7 @@ struct DressHead: View {
                     .trim(from: 0.5, to: 1.0)
                     .inked(outfit.hairShade, lw)
                     .frame(width: head * 1.06, height: head * 1.06)
-                    .offset(y: isHat ? -head * 0.22 : -head * 0.14)
+                    .offset(y: isHat ? -head * 0.26 : -head * 0.20)
             }
         case 2:
             // Curls all around the top of the head.
@@ -1745,11 +1819,33 @@ struct DressHead: View {
     // MARK: Face
 
     private var eyesView: some View {
-        HStack(spacing: head * 0.14) {
+        HStack(spacing: head * 0.17) {
             eye
             eye
         }
-        .offset(y: -head * 0.04)
+        .offset(y: head * 0.005)
+    }
+
+    /// Two soft brows. They lift when the face is surprised and tilt down a
+    /// little when it is sleepy, which is most of what makes a face read.
+    private var browsView: some View {
+        HStack(spacing: head * 0.21) {
+            brow(flip: false)
+            brow(flip: true)
+        }
+        .offset(y: -head * (outfit.mood == .surprised ? 0.20 : 0.17))
+    }
+
+    private func brow(flip: Bool) -> some View {
+        SmileShape()
+            .stroke(
+                outfit.kind.isAnimal ? DressInk.line.opacity(0.5) : outfit.hairShade.opacity(0.85),
+                style: StrokeStyle(lineWidth: head * 0.035, lineCap: .round)
+            )
+            .frame(width: head * 0.17, height: head * 0.055)
+            .rotationEffect(.degrees(180))
+            .rotationEffect(.degrees(outfit.mood == .sleepy ? (flip ? -8 : 8) : 0))
+            .scaleEffect(x: flip ? -1 : 1)
     }
 
     @ViewBuilder
@@ -1815,16 +1911,28 @@ struct DressHead: View {
         default:
             SmileShape()
                 .stroke(DressInk.line, style: StrokeStyle(lineWidth: head * 0.038, lineCap: .round))
-                .frame(width: head * 0.30, height: head * 0.15)
-                .offset(y: head * 0.20)
+                .frame(width: head * 0.28, height: head * 0.14)
+                .offset(y: head * 0.23)
         }
     }
 
+    @ViewBuilder
     private var noseView: some View {
-        Ellipse()
-            .fill(DressInk.line)
-            .frame(width: head * 0.15, height: head * 0.10)
-            .offset(y: head * 0.10)
+        if kind.isAnimal {
+            Ellipse()
+                .inked(DressInk.line, lw * 0.5, opacity: 0.0)
+                .frame(width: head * 0.15, height: head * 0.10)
+                .offset(y: head * 0.10)
+        } else {
+            // Just a soft curve: a filled blob would look like a snout.
+            SmileShape()
+                .stroke(
+                    DressInk.line.opacity(0.45),
+                    style: StrokeStyle(lineWidth: head * 0.03, lineCap: .round)
+                )
+                .frame(width: head * 0.09, height: head * 0.05)
+                .offset(y: head * 0.10)
+        }
     }
 
     private var glassesView: some View {
@@ -1958,34 +2066,103 @@ struct BackdropScene: View {
 
     private func bedroom(w: CGFloat, h: CGFloat) -> some View {
         ZStack {
-            Color(red: 0.96, green: 0.93, blue: 0.88)
+            // Wall, skirting board and wooden floor.
+            LinearGradient(
+                colors: [
+                    Color(red: 0.97, green: 0.94, blue: 0.90),
+                    Color(red: 0.94, green: 0.90, blue: 0.85),
+                ],
+                startPoint: .top, endPoint: .bottom
+            )
             Rectangle()
-                .fill(Color(red: 0.87, green: 0.79, blue: 0.68))
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.88, green: 0.79, blue: 0.67),
+                            Color(red: 0.81, green: 0.70, blue: 0.56),
+                        ],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
                 .frame(height: h * 0.24)
                 .position(x: w / 2, y: h * 0.88)
+            Rectangle()
+                .fill(.white.opacity(0.75))
+                .frame(height: h * 0.012)
+                .position(x: w / 2, y: h * 0.76)
+
+            // Window with a sky behind it.
             ZStack {
                 RoundedRectangle(cornerRadius: w * 0.03)
-                    .fill(Color(red: 0.78, green: 0.88, blue: 0.95))
-                Rectangle().fill(.white.opacity(0.9)).frame(width: w * 0.012)
-                Rectangle().fill(.white.opacity(0.9)).frame(height: h * 0.012)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.72, green: 0.86, blue: 0.96),
+                                Color(red: 0.86, green: 0.93, blue: 0.98),
+                            ],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                Circle()
+                    .fill(.white.opacity(0.85))
+                    .frame(width: w * 0.07, height: w * 0.07)
+                    .offset(x: w * 0.05, y: -h * 0.05)
+                Rectangle().fill(.white.opacity(0.95)).frame(width: w * 0.014)
+                Rectangle().fill(.white.opacity(0.95)).frame(height: h * 0.014)
             }
             .frame(width: w * 0.28, height: h * 0.26)
             .overlay(
                 RoundedRectangle(cornerRadius: w * 0.03)
-                    .stroke(.white, lineWidth: 4)
+                    .stroke(.white, lineWidth: 5)
                     .frame(width: w * 0.28, height: h * 0.26)
             )
+            .shadow(color: .black.opacity(0.07), radius: 6, y: 3)
             .position(x: w * 0.22, y: h * 0.26)
+
+            // A bed with a headboard, a blanket folded over and a pillow.
             ZStack {
-                RoundedRectangle(cornerRadius: w * 0.04)
-                    .fill(Palette.blue.opacity(0.55))
-                    .frame(width: w * 0.42, height: h * 0.16)
-                RoundedRectangle(cornerRadius: w * 0.03)
+                // Headboard.
+                RoundedRectangle(cornerRadius: w * 0.02)
+                    .fill(Palette.brown.opacity(0.75))
+                    .frame(width: w * 0.045, height: h * 0.13)
+                    .offset(x: w * 0.168, y: -h * 0.028)
+                // Mattress.
+                RoundedRectangle(cornerRadius: w * 0.02)
                     .fill(.white)
-                    .frame(width: w * 0.14, height: h * 0.07)
-                    .offset(x: -w * 0.12, y: -h * 0.03)
+                    .frame(width: w * 0.36, height: h * 0.075)
+                // Blanket folded over the foot of the bed.
+                RoundedRectangle(cornerRadius: w * 0.018)
+                    .fill(
+                        LinearGradient(
+                            colors: [Palette.blue.opacity(0.8), Palette.blue.opacity(0.55)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .frame(width: w * 0.22, height: h * 0.062)
+                    .offset(x: -w * 0.068)
+                // Pillow.
+                RoundedRectangle(cornerRadius: w * 0.015)
+                    .fill(.white)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: w * 0.015)
+                            .stroke(Palette.ink.opacity(0.10), lineWidth: 1)
+                    )
+                    .frame(width: w * 0.10, height: h * 0.038)
+                    .offset(x: w * 0.113, y: -h * 0.032)
+                // Legs.
+                HStack(spacing: w * 0.28) {
+                    RoundedRectangle(cornerRadius: w * 0.008)
+                        .fill(Palette.brown.opacity(0.7))
+                        .frame(width: w * 0.022, height: h * 0.03)
+                    RoundedRectangle(cornerRadius: w * 0.008)
+                        .fill(Palette.brown.opacity(0.7))
+                        .frame(width: w * 0.022, height: h * 0.03)
+                }
+                .offset(y: h * 0.05)
             }
-            .position(x: w * 0.78, y: h * 0.74)
+            .frame(width: w * 0.40, height: h * 0.18)
+            .shadow(color: .black.opacity(0.08), radius: 6, y: 4)
+            .position(x: w * 0.70, y: h * 0.755)
         }
     }
 

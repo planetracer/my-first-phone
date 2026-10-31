@@ -3,6 +3,44 @@ import AVFoundation
 
 // MARK: - Music room (xylophone, drums, piano and bells)
 
+/// Two wooden rails under the xylophone bars, narrowing with them.
+struct XylophoneFrame: View {
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            let h = geo.size.height
+            ZStack {
+                rail(w: w, h: h, side: -1)
+                rail(w: w, h: h, side: 1)
+            }
+        }
+    }
+
+    private func rail(w: CGFloat, h: CGFloat, side: CGFloat) -> some View {
+        let cx = w / 2
+        let topOffset = w * 0.41
+        let bottomOffset = w * 0.27
+        let half = w * 0.028
+        return Path { path in
+            path.move(to: CGPoint(x: cx + side * (topOffset - half), y: 0))
+            path.addLine(to: CGPoint(x: cx + side * (topOffset + half), y: 0))
+            path.addLine(to: CGPoint(x: cx + side * (bottomOffset + half), y: h))
+            path.addLine(to: CGPoint(x: cx + side * (bottomOffset - half), y: h))
+            path.closeSubpath()
+        }
+        .fill(
+            LinearGradient(
+                colors: [
+                    Color(red: 0.80, green: 0.66, blue: 0.49),
+                    Color(red: 0.66, green: 0.52, blue: 0.37),
+                ],
+                startPoint: .leading, endPoint: .trailing
+            )
+        )
+        .shadow(color: .black.opacity(0.10), radius: 4, y: 2)
+    }
+}
+
 /// The four toys in the music room.
 enum MusicInstrument: String, CaseIterable, Identifiable {
     case xylophone, drums, piano, bells
@@ -499,16 +537,37 @@ struct MusicView: View {
     private func xylophone(_ size: CGSize) -> some View {
         let spacing: CGFloat = 8
         let barHeight = max(26, (size.height - spacing * 7) / 8)
-        return VStack(spacing: spacing) {
+        return ZStack {
+            // The wooden frame the bars are strung on, so they read as one
+            // instrument instead of eight loose blocks.
+            XylophoneFrame()
+                .padding(.vertical, barHeight * 0.34)
+            bars(size, spacing: spacing, barHeight: barHeight)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func bars(_ size: CGSize, spacing: CGFloat, barHeight: CGFloat) -> some View {
+        VStack(spacing: spacing) {
             ForEach(0..<8, id: \.self) { i in
                 let color = Self.barColors[i]
                 RoundedRectangle(cornerRadius: 12)
-                    .fill(color)
+                    .fill(color.gradient)
+                    .overlay(
+                        // A sheen along the top edge of the bar.
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(
+                                LinearGradient(
+                                    colors: [.white.opacity(0.28), .clear],
+                                    startPoint: .top, endPoint: .center
+                                )
+                            )
+                    )
                     .overlay(
                         HStack {
-                            Circle().fill(.white.opacity(0.55)).frame(width: 7, height: 7)
+                            Circle().fill(.white.opacity(0.65)).frame(width: 7, height: 7)
                             Spacer()
-                            Circle().fill(.white.opacity(0.55)).frame(width: 7, height: 7)
+                            Circle().fill(.white.opacity(0.65)).frame(width: 7, height: 7)
                         }
                         .padding(.horizontal, 14)
                     )
@@ -521,7 +580,6 @@ struct MusicView: View {
                     .onTapGesture { tapKey(i) }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func bells(_ size: CGSize) -> some View {

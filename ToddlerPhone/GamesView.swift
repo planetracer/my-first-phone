@@ -265,7 +265,55 @@ struct BonusCloud: View {
     }
 }
 
-/// A hand-drawn balloon: shiny ellipse, knot, and a string.
+/// The classic balloon outline: round over the top, drawn in to a little
+/// neck at the bottom. An ellipse reads as an egg, not a balloon.
+struct BalloonBody: Shape {
+    func path(in r: CGRect) -> Path {
+        let w = r.width
+        let h = r.height
+        let cx = r.midX
+        var path = Path()
+        path.move(to: CGPoint(x: cx, y: r.maxY))
+        path.addCurve(
+            to: CGPoint(x: r.minX, y: r.minY + h * 0.40),
+            control1: CGPoint(x: cx - w * 0.26, y: r.maxY - h * 0.13),
+            control2: CGPoint(x: r.minX, y: r.minY + h * 0.78)
+        )
+        path.addCurve(
+            to: CGPoint(x: cx, y: r.minY),
+            control1: CGPoint(x: r.minX, y: r.minY + h * 0.13),
+            control2: CGPoint(x: cx - w * 0.32, y: r.minY)
+        )
+        path.addCurve(
+            to: CGPoint(x: r.maxX, y: r.minY + h * 0.40),
+            control1: CGPoint(x: cx + w * 0.32, y: r.minY),
+            control2: CGPoint(x: r.maxX, y: r.minY + h * 0.13)
+        )
+        path.addCurve(
+            to: CGPoint(x: cx, y: r.maxY),
+            control1: CGPoint(x: r.maxX, y: r.minY + h * 0.78),
+            control2: CGPoint(x: cx + w * 0.26, y: r.maxY - h * 0.13)
+        )
+        path.closeSubpath()
+        return path
+    }
+}
+
+/// A string with a kink in it, the way a real one hangs.
+struct BalloonString: Shape {
+    func path(in r: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: r.midX, y: r.minY))
+        path.addCurve(
+            to: CGPoint(x: r.midX + r.width * 0.2, y: r.maxY),
+            control1: CGPoint(x: r.midX - r.width * 1.6, y: r.minY + r.height * 0.40),
+            control2: CGPoint(x: r.midX + r.width * 1.8, y: r.minY + r.height * 0.74)
+        )
+        return path
+    }
+}
+
+/// A balloon: a rounded body lit from the top left, a knot and a string.
 struct BalloonShape: View {
     let color: Color
     var isRainbow: Bool = false
@@ -278,45 +326,54 @@ struct BalloonShape: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Ellipse()
+            BalloonBody()
                 .fill(
-                    LinearGradient(
-                        colors: [color.opacity(0.75), color],
-                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    RadialGradient(
+                        colors: [color.opacity(0.55), color, color.opacity(0.92)],
+                        center: UnitPoint(x: 0.34, y: 0.28),
+                        startRadius: 2,
+                        endRadius: 62
                     )
                 )
                 .overlay {
                     if isRainbow {
-                        Ellipse()
+                        BalloonBody()
                             .fill(AngularGradient(colors: Self.rainbow, center: .center))
-                            .opacity(0.95)
+                            .opacity(0.92)
                     }
                 }
                 .overlay {
                     if hasGlow {
-                        Ellipse()
-                            .stroke(.white.opacity(0.8), lineWidth: 4)
+                        BalloonBody()
+                            .stroke(.white.opacity(0.85), lineWidth: 4)
                     }
                 }
                 .overlay(
+                    // The shine, following the curve of the balloon.
                     Ellipse()
-                        .fill(.white.opacity(0.4))
-                        .frame(width: 14, height: 22)
-                        .rotationEffect(.degrees(20))
-                        .offset(x: -12, y: -14)
+                        .fill(.white.opacity(0.45))
+                        .frame(width: 13, height: 21)
+                        .rotationEffect(.degrees(24))
+                        .offset(x: -13, y: -15)
                 )
-                .frame(width: 56, height: 68)
+                .overlay(
+                    BalloonBody().stroke(.black.opacity(0.10), lineWidth: 1)
+                )
+                .frame(width: 60, height: 74)
 
-            Rectangle()
+            // Knot.
+            Triangle()
                 .fill(color)
-                .frame(width: 8, height: 8)
-                .rotationEffect(.degrees(45))
-                .offset(y: -4)
+                .rotationEffect(.degrees(180))
+                .frame(width: 11, height: 8)
+                .offset(y: -1)
 
-            Capsule()
-                .fill(Palette.ink.opacity(0.25))
-                .frame(width: 2, height: 26)
-                .offset(y: -4)
+            BalloonString()
+                .stroke(
+                    Palette.ink.opacity(0.28),
+                    style: StrokeStyle(lineWidth: 1.6, lineCap: .round)
+                )
+                .frame(width: 10, height: 28)
         }
     }
 }

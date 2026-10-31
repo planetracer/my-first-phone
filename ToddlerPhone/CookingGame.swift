@@ -133,43 +133,22 @@ struct ChefDish: Identifiable, Equatable {
 
 /// A friendly customer, made from the same simple shapes with a different
 /// color and hat every time.
+/// Whoever walks in for lunch. Customers are the same little people the
+/// child dresses in Dress Up, so the whole app shares one cast.
 struct ChefCustomer: Equatable {
-    let skin: Color
-    let shirt: Color
-    let hat: Int          // 0 none, 1 cap, 2 beanie, 3 bow, 4 chef hat
-    let hatColor: Color
-    let hair: Color
-    let hairStyle: Int    // 0 short crown, 1 curly, 2 buns
-
-    static let skins: [Color] = [
-        Color(red: 0.99, green: 0.88, blue: 0.78),
-        Color(red: 0.95, green: 0.78, blue: 0.62),
-        Color(red: 0.86, green: 0.64, blue: 0.45),
-        Color(red: 0.70, green: 0.48, blue: 0.32),
-        Color(red: 0.55, green: 0.36, blue: 0.24),
-        Color(red: 0.38, green: 0.25, blue: 0.17),
-    ]
-    static let shirts: [Color] = [
-        Palette.blue, Palette.pink, Palette.green,
-        Palette.purple, Palette.teal, Palette.indigo,
-    ]
-
-    static let hairs: [Color] = [
-        Color(red: 0.13, green: 0.11, blue: 0.10),
-        Color(red: 0.35, green: 0.22, blue: 0.12),
-        Color(red: 0.78, green: 0.60, blue: 0.30),
-        Color(red: 0.55, green: 0.24, blue: 0.12),
-    ]
+    var look: DressOutfit
 
     static func random() -> ChefCustomer {
-        ChefCustomer(
-            skin: skins.randomElement() ?? skins[0],
-            shirt: shirts.randomElement() ?? shirts[0],
-            hat: Int.random(in: 0...4),
-            hatColor: shirts.randomElement() ?? Palette.pink,
-            hair: hairs.randomElement() ?? hairs[0],
-            hairStyle: Int.random(in: 0...2)
-        )
+        var look = DressOutfit.random()
+        look.face = 0
+        // Nothing in their hands or on their back while they are at the table.
+        look.extra = [0, 0, 0, 1, 3].randomElement() ?? 0
+        return ChefCustomer(look: look)
+    }
+
+    /// The same person, beaming.
+    var delighted: DressOutfit {
+        look.changing { $0.face = 1 }
     }
 }
 
@@ -177,6 +156,10 @@ struct ChefCustomer: Equatable {
 
 struct CookingView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
+    /// Roomier layout on an iPad, where everything looked lost in the middle.
+    private var roomy: Bool { sizeClass == .regular }
 
     @AppStorage("chefCustomersServed") private var customersServed = 0
     @AppStorage("chefStars") private var stars = 0
@@ -245,12 +228,19 @@ struct CookingView: View {
 
     private var orderScene: some View {
         VStack(spacing: 12) {
-            HStack(alignment: .top, spacing: 8) {
-                ChefCustomerView(customer: customer, happy: false)
-                    .frame(width: 118, height: 168)
-                ChefSpeechBubble(dish: dish, picked: picked)
-                Spacer(minLength: 0)
+            ZStack(alignment: .bottom) {
+                ChefShopScene()
+                HStack(alignment: .bottom, spacing: 10) {
+                    ChefCustomerView(customer: customer, happy: false)
+                        .frame(width: roomy ? 168 : 118, height: roomy ? 240 : 168)
+                    ChefSpeechBubble(dish: dish, picked: picked)
+                        .padding(.bottom, roomy ? 86 : 54)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 14)
+                .padding(.bottom, roomy ? 14 : 10)
             }
+            .frame(height: roomy ? 300 : 206)
             .padding(.horizontal, 20)
 
             ChefShopSign(count: customersServed)
@@ -283,7 +273,7 @@ struct CookingView: View {
                 } label: {
                     VStack(spacing: 6) {
                         ChefIngredientView(ingredient: item)
-                            .frame(width: 46, height: 46)
+                            .frame(width: roomy ? 76 : 46, height: roomy ? 76 : 46)
                             .offset(y: bob ? -3.5 : 3.5)
                             .animation(
                                 .easeInOut(duration: 1.15 + Double(index) * 0.11)
@@ -295,7 +285,7 @@ struct CookingView: View {
                             .foregroundStyle(Palette.ink)
                     }
                     .frame(maxWidth: .infinity)
-                    .frame(height: 96)
+                    .frame(height: roomy ? 150 : 96)
                     .card(cornerRadius: 20)
                     .opacity(picked.contains(item) ? 0.45 : 1)
                     .rotationEffect(.degrees(nudged == item && nudgeWiggle ? 5 : 0))
@@ -419,7 +409,7 @@ struct CookingView: View {
                 HStack(alignment: .bottom, spacing: 10) {
                     ZStack(alignment: .top) {
                         ChefCustomerView(customer: customer, happy: happy)
-                            .frame(width: 130, height: 180)
+                            .frame(width: roomy ? 170 : 130, height: roomy ? 236 : 180)
                         if happy {
                             ForEach(0..<4, id: \.self) { i in
                                 ChefFloatingHeart(delay: Double(i) * 0.16, drift: CGFloat(i - 2) * 22)
@@ -613,169 +603,57 @@ struct ChefCustomerView: View {
     var happy: Bool = false
 
     var body: some View {
-        GeometryReader { geo in
-            let w = geo.size.width
-            let h = geo.size.height
-            let head = min(w, h * 0.62) * 0.62
-            let cx = w / 2
-            let headY = h * 0.34
-
-            ZStack {
-                // Body
-                RoundedRectangle(cornerRadius: head * 0.4)
-                    .fill(customer.shirt)
-                    .frame(width: head * 1.35, height: head * 1.15)
-                    .position(x: cx, y: headY + head * 1.05)
-
-                // Arms
-                HStack(spacing: head * 1.4) {
-                    Capsule().fill(customer.shirt).frame(width: head * 0.24, height: head * 0.62)
-                    Capsule().fill(customer.shirt).frame(width: head * 0.24, height: head * 0.62)
-                }
-                .position(x: cx, y: headY + head * 0.95)
-
-                // Ears
-                Circle().fill(customer.skin).frame(width: head * 0.2)
-                    .position(x: cx - head * 0.5, y: headY)
-                Circle().fill(customer.skin).frame(width: head * 0.2)
-                    .position(x: cx + head * 0.5, y: headY)
-
-                // Head
-                Circle()
-                    .fill(customer.skin)
-                    .frame(width: head, height: head)
-                    .position(x: cx, y: headY)
-
-                // Hair shows when there is no full hat on top
-                if customer.hat == 0 || customer.hat == 3 {
-                    hair(head: head, cx: cx, headY: headY)
-                }
-
-                // Cheeks
-                HStack(spacing: head * 0.36) {
-                    Circle().fill(Palette.pink.opacity(0.45)).frame(width: head * 0.16)
-                    Circle().fill(Palette.pink.opacity(0.45)).frame(width: head * 0.16)
-                }
-                .position(x: cx, y: headY + head * 0.13)
-
-                // Eyes: happy eyes curve into arches
-                HStack(spacing: head * 0.28) {
-                    eye(head: head)
-                    eye(head: head)
-                }
-                .position(x: cx, y: headY - head * 0.05)
-
-                // Mouth
-                SmileShape()
-                    .stroke(Palette.ink, style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                    .frame(width: head * (happy ? 0.44 : 0.3), height: head * (happy ? 0.24 : 0.14))
-                    .position(x: cx, y: headY + head * 0.2)
-
-                hat(head: head, cx: cx, headY: headY)
-            }
+        CharacterView(outfit: happy ? customer.delighted : customer.look)
             .animation(.spring(response: 0.4), value: happy)
+    }
+}
+
+/// The little shop the customer stands in: a warm wall and a wooden floor.
+struct ChefShopScene: View {
+    var body: some View {
+        GeometryReader { geo in
+            let h = geo.size.height
+            ZStack(alignment: .bottom) {
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.99, green: 0.95, blue: 0.88),
+                        Color(red: 0.97, green: 0.92, blue: 0.84),
+                    ],
+                    startPoint: .top, endPoint: .bottom
+                )
+                ChefCounter()
+                    .frame(height: h * 0.22)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 26))
+            .overlay(
+                RoundedRectangle(cornerRadius: 26)
+                    .stroke(Palette.ink.opacity(0.06), lineWidth: 1)
+            )
         }
     }
+}
 
-    @ViewBuilder
-    private func eye(head: CGFloat) -> some View {
-        if happy {
-            SmileShape()
-                .stroke(Palette.ink, style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                .frame(width: head * 0.16, height: head * 0.09)
-                .rotationEffect(.degrees(180))
-        } else {
-            Circle().fill(Palette.ink).frame(width: head * 0.1, height: head * 0.1)
+/// The floor of the shop: warm wood with a lighter seam along the top.
+struct ChefCounter: View {
+    var body: some View {
+        ZStack(alignment: .top) {
+            RoundedRectangle(cornerRadius: 10)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.84, green: 0.72, blue: 0.56),
+                            Color(red: 0.74, green: 0.60, blue: 0.44),
+                        ],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+            Rectangle()
+                .fill(.white.opacity(0.35))
+                .frame(height: 3)
+                .padding(.horizontal, 6)
+                .padding(.top, 3)
         }
-    }
-
-    @ViewBuilder
-    private func hair(head: CGFloat, cx: CGFloat, headY: CGFloat) -> some View {
-        switch customer.hairStyle {
-        case 1:
-            HStack(spacing: -head * 0.1) {
-                ForEach(0..<5, id: \.self) { _ in
-                    Circle().fill(customer.hair).frame(width: head * 0.32)
-                }
-            }
-            .position(x: cx, y: headY - head * 0.34)
-        case 2:
-            ZStack {
-                Circle()
-                    .trim(from: 0.5, to: 1.0)
-                    .fill(customer.hair)
-                    .frame(width: head * 1.06, height: head * 1.06)
-                HStack(spacing: head * 0.94) {
-                    Circle().fill(customer.hair).frame(width: head * 0.3)
-                    Circle().fill(customer.hair).frame(width: head * 0.3)
-                }
-                .offset(y: -head * 0.28)
-            }
-            .position(x: cx, y: headY)
-        default:
-            Circle()
-                .trim(from: 0.5, to: 1.0)
-                .fill(customer.hair)
-                .frame(width: head * 1.08, height: head * 1.08)
-                .position(x: cx, y: headY - head * 0.04)
-        }
-    }
-
-    @ViewBuilder
-    private func hat(head: CGFloat, cx: CGFloat, headY: CGFloat) -> some View {
-        switch customer.hat {
-        case 1:
-            // Cap with a brim
-            ZStack {
-                Circle().trim(from: 0.5, to: 1).fill(customer.hatColor)
-                    .frame(width: head * 1.04, height: head * 1.04)
-                Capsule().fill(customer.hatColor)
-                    .frame(width: head * 0.66, height: head * 0.16)
-                    .offset(x: head * 0.44, y: head * 0.02)
-            }
-            .position(x: cx, y: headY - head * 0.34)
-        case 2:
-            // Winter beanie with a bobble
-            ZStack {
-                Circle().trim(from: 0.5, to: 1).fill(customer.hatColor)
-                    .frame(width: head * 1.06, height: head * 1.06)
-                Capsule().fill(customer.hatColor.opacity(0.75))
-                    .frame(width: head * 1.06, height: head * 0.18)
-                    .offset(y: head * 0.02)
-                Circle().fill(customer.hatColor.opacity(0.8))
-                    .frame(width: head * 0.24)
-                    .offset(y: -head * 0.5)
-            }
-            .position(x: cx, y: headY - head * 0.3)
-        case 3:
-            // A bow on the side
-            HStack(spacing: -head * 0.03) {
-                Triangle().fill(customer.hatColor)
-                    .frame(width: head * 0.24, height: head * 0.26)
-                    .rotationEffect(.degrees(90))
-                Circle().fill(customer.hatColor).frame(width: head * 0.14)
-                Triangle().fill(customer.hatColor)
-                    .frame(width: head * 0.24, height: head * 0.26)
-                    .rotationEffect(.degrees(-90))
-            }
-            .position(x: cx + head * 0.46, y: headY - head * 0.42)
-        case 4:
-            // A puffy chef hat
-            ZStack {
-                HStack(spacing: -head * 0.1) {
-                    Circle().fill(.white).frame(width: head * 0.42)
-                    Circle().fill(.white).frame(width: head * 0.5).offset(y: -head * 0.06)
-                    Circle().fill(.white).frame(width: head * 0.42)
-                }
-                RoundedRectangle(cornerRadius: head * 0.08).fill(.white)
-                    .frame(width: head * 0.82, height: head * 0.22)
-                    .offset(y: head * 0.2)
-            }
-            .shadow(color: .black.opacity(0.08), radius: 3, y: 2)
-            .position(x: cx, y: headY - head * 0.52)
-        default:
-            EmptyView()
-        }
+        .shadow(color: .black.opacity(0.08), radius: 5, y: 3)
     }
 }
 
@@ -2200,64 +2078,80 @@ struct ChefIngredientView: View {
         GeometryReader { geo in
             let w = geo.size.width
             let h = geo.size.height
+            let lw = max(0.9, min(w, h) * 0.05)
             switch ingredient {
             case .carrot:
                 ZStack {
-                    Triangle()
-                        .fill(Palette.orange)
-                        .frame(width: w * 0.45, height: h * 0.8)
-                        .rotationEffect(.degrees(180))
-                        .position(x: w / 2, y: h * 0.58)
+                    LimbShape(taper: 0.16)
+                        .inked(Palette.orange, lw)
+                        .frame(width: w * 0.42, height: h * 0.76)
+                        .position(x: w / 2, y: h * 0.60)
                     HStack(spacing: 1) {
-                        Capsule().fill(Palette.green).frame(width: w * 0.08, height: h * 0.24)
-                        Capsule().fill(Palette.green).frame(width: w * 0.08, height: h * 0.3)
-                        Capsule().fill(Palette.green).frame(width: w * 0.08, height: h * 0.24)
+                        Capsule()
+                        .inked(Palette.green, lw).frame(width: w * 0.08, height: h * 0.24)
+                        Capsule()
+                        .inked(Palette.green, lw).frame(width: w * 0.08, height: h * 0.3)
+                        Capsule()
+                        .inked(Palette.green, lw).frame(width: w * 0.08, height: h * 0.24)
                     }
                     .position(x: w / 2, y: h * 0.12)
                 }
             case .tomato:
                 ZStack {
-                    Circle().fill(Palette.red).frame(width: w * 0.8)
+                    Circle()
+                        .inked(Palette.red, lw).frame(width: w * 0.8)
                         .position(x: w / 2, y: h * 0.56)
                     HStack(spacing: 1) {
-                        Capsule().fill(Palette.green).frame(width: w * 0.1, height: h * 0.18)
+                        Capsule()
+                        .inked(Palette.green, lw).frame(width: w * 0.1, height: h * 0.18)
                             .rotationEffect(.degrees(-30))
-                        Capsule().fill(Palette.green).frame(width: w * 0.1, height: h * 0.2)
-                        Capsule().fill(Palette.green).frame(width: w * 0.1, height: h * 0.18)
+                        Capsule()
+                        .inked(Palette.green, lw).frame(width: w * 0.1, height: h * 0.2)
+                        Capsule()
+                        .inked(Palette.green, lw).frame(width: w * 0.1, height: h * 0.18)
                             .rotationEffect(.degrees(30))
                     }
                     .position(x: w / 2, y: h * 0.14)
                 }
             case .egg:
                 ZStack {
-                    Ellipse().fill(.white).frame(width: w * 0.8, height: h * 0.85)
+                    Ellipse()
+                        .inked(.white, lw).frame(width: w * 0.8, height: h * 0.85)
                         .shadow(color: .black.opacity(0.1), radius: 2)
-                    Circle().fill(Palette.yellow).frame(width: w * 0.35)
+                    Circle()
+                        .inked(Palette.yellow, lw).frame(width: w * 0.35)
                 }
                 .position(x: w / 2, y: h / 2)
             case .broccoli:
                 ZStack {
-                    Capsule().fill(Color(red: 0.65, green: 0.75, blue: 0.45))
+                    Capsule()
+                        .inked(Color(red: 0.65, green: 0.75, blue: 0.45), lw)
                         .frame(width: w * 0.2, height: h * 0.5)
                         .position(x: w / 2, y: h * 0.7)
                     ZStack {
-                        Circle().fill(Palette.green).frame(width: w * 0.42).offset(x: -w * 0.18)
-                        Circle().fill(Palette.green).frame(width: w * 0.5).offset(y: -h * 0.08)
-                        Circle().fill(Palette.green).frame(width: w * 0.42).offset(x: w * 0.18)
+                        Circle()
+                        .inked(Palette.green, lw).frame(width: w * 0.42).offset(x: -w * 0.18)
+                        Circle()
+                        .inked(Palette.green, lw).frame(width: w * 0.5).offset(y: -h * 0.08)
+                        Circle()
+                        .inked(Palette.green, lw).frame(width: w * 0.42).offset(x: w * 0.18)
                     }
                     .position(x: w / 2, y: h * 0.34)
                 }
             case .corn:
                 ZStack {
-                    Capsule().fill(Palette.yellow).frame(width: w * 0.42, height: h * 0.85)
-                    Capsule().fill(Palette.green).frame(width: w * 0.16, height: h * 0.55)
+                    Capsule()
+                        .inked(Palette.yellow, lw).frame(width: w * 0.42, height: h * 0.85)
+                    Capsule()
+                        .inked(Palette.green, lw).frame(width: w * 0.16, height: h * 0.55)
                         .rotationEffect(.degrees(24))
                         .offset(x: w * 0.22, y: h * 0.14)
                 }
                 .position(x: w / 2, y: h / 2)
             case .mushroom:
                 ZStack {
-                    Capsule().fill(Color(red: 0.93, green: 0.89, blue: 0.82))
+                    Capsule()
+                        .inked(Color(red: 0.93, green: 0.89, blue: 0.82), lw)
                         .frame(width: w * 0.3, height: h * 0.5)
                         .position(x: w / 2, y: h * 0.68)
                     Circle()
@@ -2269,14 +2163,14 @@ struct ChefIngredientView: View {
             case .potato:
                 ZStack {
                     Ellipse()
-                        .fill(Color(red: 0.82, green: 0.68, blue: 0.47))
+                        .inked(Color(red: 0.82, green: 0.68, blue: 0.47), lw)
                         .frame(width: w * 0.82, height: h * 0.62)
                     Ellipse()
-                        .fill(Color(red: 0.68, green: 0.54, blue: 0.36))
+                        .inked(Color(red: 0.68, green: 0.54, blue: 0.36), lw)
                         .frame(width: w * 0.1, height: h * 0.07)
                         .offset(x: -w * 0.14, y: -h * 0.06)
                     Ellipse()
-                        .fill(Color(red: 0.68, green: 0.54, blue: 0.36))
+                        .inked(Color(red: 0.68, green: 0.54, blue: 0.36), lw)
                         .frame(width: w * 0.08, height: h * 0.06)
                         .offset(x: w * 0.12, y: h * 0.08)
                 }
@@ -2284,12 +2178,14 @@ struct ChefIngredientView: View {
             case .cheese:
                 ZStack {
                     Triangle()
-                        .fill(Palette.yellow)
+                        .inked(Palette.yellow, lw)
                         .frame(width: w * 0.8, height: h * 0.62)
-                    Circle().fill(Palette.yellow.opacity(0.55))
+                    Circle()
+                        .inked(Palette.yellow.opacity(0.55), lw)
                         .frame(width: w * 0.12)
                         .offset(x: -w * 0.12, y: h * 0.12)
-                    Circle().fill(Palette.yellow.opacity(0.55))
+                    Circle()
+                        .inked(Palette.yellow.opacity(0.55), lw)
                         .frame(width: w * 0.1)
                         .offset(x: w * 0.13, y: h * 0.16)
                 }
@@ -2297,24 +2193,28 @@ struct ChefIngredientView: View {
             case .banana:
                 ZStack {
                     ChefCrescentShape()
-                        .fill(Palette.yellow)
+                        .inked(Palette.yellow, lw)
                         .frame(width: w * 0.68, height: h * 0.66)
                         .rotationEffect(.degrees(-20))
                     Capsule()
-                        .fill(Palette.brown)
+                        .inked(Palette.brown, lw)
                         .frame(width: w * 0.08, height: h * 0.12)
                         .offset(x: -w * 0.24, y: -h * 0.24)
                 }
                 .position(x: w / 2, y: h / 2)
             case .berry:
                 ZStack {
-                    Circle().fill(Palette.purple).frame(width: w * 0.42)
+                    Circle()
+                        .inked(Palette.purple, lw).frame(width: w * 0.42)
                         .offset(x: -w * 0.14, y: h * 0.06)
-                    Circle().fill(Palette.purple.opacity(0.9)).frame(width: w * 0.42)
+                    Circle()
+                        .inked(Palette.purple.opacity(0.9), lw).frame(width: w * 0.42)
                         .offset(x: w * 0.14, y: h * 0.06)
-                    Circle().fill(Palette.purple.opacity(0.85)).frame(width: w * 0.38)
+                    Circle()
+                        .inked(Palette.purple.opacity(0.85), lw).frame(width: w * 0.38)
                         .offset(y: -h * 0.12)
-                    Capsule().fill(Palette.green)
+                    Capsule()
+                        .inked(Palette.green, lw)
                         .frame(width: w * 0.22, height: h * 0.1)
                         .rotationEffect(.degrees(-24))
                         .offset(x: w * 0.14, y: -h * 0.3)
@@ -2323,18 +2223,18 @@ struct ChefIngredientView: View {
             case .milk:
                 ZStack {
                     RoundedRectangle(cornerRadius: w * 0.12)
-                        .fill(.white)
+                        .inked(.white, lw)
                         .overlay(
                             RoundedRectangle(cornerRadius: w * 0.12)
                                 .stroke(Palette.field, lineWidth: 2.5)
                         )
                         .frame(width: w * 0.5, height: h * 0.7)
                     RoundedRectangle(cornerRadius: w * 0.04)
-                        .fill(Palette.blue.opacity(0.8))
+                        .inked(Palette.blue.opacity(0.8), lw)
                         .frame(width: w * 0.5, height: h * 0.16)
                         .offset(y: h * 0.14)
                     Capsule()
-                        .fill(Palette.blue)
+                        .inked(Palette.blue, lw)
                         .frame(width: w * 0.18, height: h * 0.12)
                         .offset(y: -h * 0.4)
                 }
