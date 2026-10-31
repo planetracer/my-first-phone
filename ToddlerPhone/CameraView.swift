@@ -58,10 +58,9 @@ enum KidFilter: String, CaseIterable, Identifiable {
 // MARK: - Photo storage (app-private folder, never the system photo library)
 
 @MainActor
-@Observable
-final class KidPhotoStore {
+final class KidPhotoStore: ObservableObject {
     static let shared = KidPhotoStore()
-    var photos: [URL] = []
+    @Published var photos: [URL] = []
 
     nonisolated static var dir: URL {
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -101,22 +100,21 @@ final class KidPhotoStore {
 // MARK: - Camera controller
 
 @MainActor
-@Observable
-final class CameraController: NSObject, AVCapturePhotoCaptureDelegate, AVCaptureVideoDataOutputSampleBufferDelegate {
+final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureDelegate, AVCaptureVideoDataOutputSampleBufferDelegate {
     let session = AVCaptureSession()
-    var noCamera = false
-    var filter: KidFilter = .none {
+    @Published var noCamera = false
+    @Published var filter: KidFilter = .none {
         didSet { filterForFrames = filter }
     }
     /// Live filtered preview frame (used when a filter is active).
-    var filteredFrame: CGImage?
+    @Published var filteredFrame: CGImage?
 
-    @ObservationIgnored private let output = AVCapturePhotoOutput()
-    @ObservationIgnored private let videoOutput = AVCaptureVideoDataOutput()
-    @ObservationIgnored private var position: AVCaptureDevice.Position = .back
-    @ObservationIgnored nonisolated(unsafe) private var filterForFrames: KidFilter = .none
-    @ObservationIgnored nonisolated(unsafe) private let ciContext = CIContext()
-    @ObservationIgnored private let videoQueue = DispatchQueue(label: "camera.frames")
+    private let output = AVCapturePhotoOutput()
+    private let videoOutput = AVCaptureVideoDataOutput()
+    private var position: AVCaptureDevice.Position = .back
+    nonisolated(unsafe) private var filterForFrames: KidFilter = .none
+    nonisolated(unsafe) private let ciContext = CIContext()
+    private let videoQueue = DispatchQueue(label: "camera.frames")
 
     func start() async {
         guard await AVCaptureDevice.requestAccess(for: .video) else {
@@ -166,7 +164,7 @@ final class CameraController: NSObject, AVCapturePhotoCaptureDelegate, AVCapture
         noCamera = false
     }
 
-    @ObservationIgnored nonisolated(unsafe) private var frontCamera = false
+    nonisolated(unsafe) private var frontCamera = false
 
     // Live frames for the filtered preview.
     nonisolated func captureOutput(
@@ -236,8 +234,8 @@ struct CameraPreview: UIViewRepresentable {
 // MARK: - Kid camera screen
 
 struct KidCameraView: View {
-    @State private var camera = CameraController()
-    @State private var photoStore = KidPhotoStore.shared
+    @StateObject private var camera = CameraController()
+    @StateObject private var photoStore = KidPhotoStore.shared
     @State private var flash = false
     @State private var showGallery = false
 
@@ -450,7 +448,8 @@ struct FamilyPhotoWallView: View {
 
 struct KidGalleryView: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var photoStore = KidPhotoStore.shared
+    @StateObject private var photoStore = KidPhotoStore.shared
+    @StateObject private var familyStore = FamilyStore.shared
     @State private var selected: URL?
     @State private var sent = false
 
@@ -547,7 +546,7 @@ struct KidGalleryView: View {
                 Spacer()
 
                 HStack(spacing: 24) {
-                    if FamilyStore.shared.isConnected {
+                    if familyStore.isConnected {
                         Button {
                             Sfx.bump()
                             sent = true

@@ -2142,7 +2142,7 @@ struct ChefRisingBubble: View {
             .offset(y: up ? -20 : 4)
             .opacity(active ? (up ? 0 : 0.7) : 0)
             .onAppear { animate() }
-            .onChange(of: active) { _, _ in animate() }
+            .onChange(of: active) { _ in animate() }
     }
 
     private func animate() {

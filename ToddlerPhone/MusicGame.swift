@@ -361,7 +361,7 @@ struct MusicView: View {
                 pulse = true
             }
         }
-        .onChange(of: instrument) { _, new in
+        .onChange(of: instrument) { new in
             MusicEngine.shared.prepare(new)
         }
         .onDisappear { playbackTask?.cancel() }
@@ -835,7 +835,7 @@ private struct MusicNoteFloat: View {
             }
         }
         .allowsHitTesting(false)
-        .onChange(of: trigger) { _, _ in
+        .onChange(of: trigger) { _ in
             guard items.count < 3 else { return }
             let id = UUID()
             items.append(id)

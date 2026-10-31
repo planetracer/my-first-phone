@@ -57,7 +57,7 @@ struct PhoneView: View {
     }
 
     @State private var showFamilyChat = false
-    @State private var familyStore = FamilyStore.shared
+    @StateObject private var familyStore = FamilyStore.shared
     @State private var chatPeer: PeerChat?
 
     struct PeerChat: Identifiable {

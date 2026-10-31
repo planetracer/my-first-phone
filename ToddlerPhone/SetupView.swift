@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - First-launch onboarding wizard
 
 struct SetupView: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     @State private var step: Step = .welcome
     @State private var role: PhoneRole = .kid
     @State private var name = ""
@@ -231,7 +231,7 @@ struct SetupView: View {
                 .multilineTextAlignment(.center)
                 .padding(.vertical, 16)
                 .background(Palette.card, in: RoundedRectangle(cornerRadius: 20))
-                .onChange(of: pin) {
+                .onChange(of: pin) { _ in
                     pin = String(pin.filter(\.isNumber).prefix(4))
                 }
 
@@ -360,8 +360,8 @@ struct SetupView: View {
 // MARK: - Grown-up mode: family dashboard
 
 struct ParentHomeView: View {
-    @Environment(AppModel.self) private var model
-    @State private var familyStore = FamilyStore.shared
+    @EnvironmentObject private var model: AppModel
+    @StateObject private var familyStore = FamilyStore.shared
     @State private var showSettings = false
     @State private var showFamilyChat = false
     @State private var showPhotoWall = false

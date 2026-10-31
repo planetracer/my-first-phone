@@ -2,7 +2,6 @@ import SwiftUI
 import WebRTC
 import AVFoundation
 import CallKit
-import Observation
 
 // MARK: - CallKit bridge (native incoming-call UI, lock-screen answer)
 
@@ -91,8 +90,7 @@ final class CallKitManager: NSObject, CXProviderDelegate {
 // MARK: - Live family audio calls (peer-to-peer WebRTC, signaled over CloudKit)
 
 @MainActor
-@Observable
-final class CallEngine: NSObject {
+final class CallEngine: NSObject, ObservableObject {
     static let shared = CallEngine()
 
     enum Phase: Equatable {
@@ -104,25 +102,25 @@ final class CallEngine: NSObject {
         case ended(String)
     }
 
-    var phase: Phase = .idle
-    var peerName = "Family"
-    var isMuted = false {
+    @Published var phase: Phase = .idle
+    @Published var peerName = "Family"
+    @Published var isMuted = false {
         didSet { audioTrack?.isEnabled = !isMuted }
     }
-    var speakerOn = true {
+    @Published var speakerOn = true {
         didSet { applySpeaker() }
     }
-    var videoOn = false
-    var localVideoTrack: RTCVideoTrack?
-    var remoteVideoTrack: RTCVideoTrack?
+    @Published var videoOn = false
+    @Published var localVideoTrack: RTCVideoTrack?
+    @Published var remoteVideoTrack: RTCVideoTrack?
 
-    @ObservationIgnored private var factory: RTCPeerConnectionFactory?
-    @ObservationIgnored private var peer: RTCPeerConnection?
-    @ObservationIgnored private var audioTrack: RTCAudioTrack?
-    @ObservationIgnored private var videoSource: RTCVideoSource?
-    @ObservationIgnored private var capturer: RTCCameraVideoCapturer?
-    @ObservationIgnored private var cameraPosition: AVCaptureDevice.Position = .front
-    @ObservationIgnored private let frameGrabber = FrameGrabber()
+    private var factory: RTCPeerConnectionFactory?
+    private var peer: RTCPeerConnection?
+    private var audioTrack: RTCAudioTrack?
+    private var videoSource: RTCVideoSource?
+    private var capturer: RTCCameraVideoCapturer?
+    private var cameraPosition: AVCaptureDevice.Position = .front
+    private let frameGrabber = FrameGrabber()
 
     /// Keeps the newest remote video frame so it can be saved as a photo.
     final class FrameGrabber: NSObject, RTCVideoRenderer {
@@ -145,11 +143,11 @@ final class CallEngine: NSObject {
         KidPhotoStore.shared.save(data)
         return true
     }
-    @ObservationIgnored private var callID = ""
-    @ObservationIgnored private var callTarget = ""
-    @ObservationIgnored private var pendingOfferSDP: String?
-    @ObservationIgnored private var pollTask: Task<Void, Never>?
-    @ObservationIgnored private static var sslInitialized = false
+    private var callID = ""
+    private var callTarget = ""
+    private var pendingOfferSDP: String?
+    private var pollTask: Task<Void, Never>?
+    private static var sslInitialized = false
 
     private var store: FamilyStore { FamilyStore.shared }
 
@@ -229,7 +227,7 @@ final class CallEngine: NSObject {
     // MARK: - Call setup
 
     private func placeOffer() async {
-        guard await AVAudioApplication.requestRecordPermission() else {
+        guard await requestRecordPermissionCompat() else {
             reset("Microphone permission needed")
             return
         }
@@ -248,7 +246,7 @@ final class CallEngine: NSObject {
 
     private func answerCall() async {
         guard let offerSDP = pendingOfferSDP else { return }
-        guard await AVAudioApplication.requestRecordPermission() else {
+        guard await requestRecordPermissionCompat() else {
             reset("Microphone permission needed")
             return
         }
@@ -584,7 +582,7 @@ struct VideoTrackView: UIViewRepresentable {
 }
 
 struct LiveCallView: View {
-    @State private var engine = CallEngine.shared
+    @StateObject private var engine = CallEngine.shared
     @State private var snapped = false
 
     private var showsRemoteVideo: Bool {

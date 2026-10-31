@@ -1,5 +1,4 @@
 import SwiftUI
-import Observation
 
 // MARK: - Path helpers
 //
@@ -428,8 +427,7 @@ extension ColoringPage {
 
 // MARK: - Fills that survive leaving the screen
 
-@Observable
-final class ColoringStore {
+final class ColoringStore: ObservableObject {
     static let shared = ColoringStore()
 
     struct Step {
@@ -437,9 +435,9 @@ final class ColoringStore {
         let previous: Color?
     }
 
-    var fills: [String: [Int: Color]] = [:]
-    var steps: [String: [Step]] = [:]
-    var finished: Set<String> = []
+    @Published var fills: [String: [Int: Color]] = [:]
+    @Published var steps: [String: [Step]] = [:]
+    @Published var finished: Set<String> = []
 
     private init() {}
 }
@@ -447,7 +445,7 @@ final class ColoringStore {
 // MARK: - Screen
 
 struct ColoringView: View {
-    @State private var store = ColoringStore.shared
+    @StateObject private var store = ColoringStore.shared
     @State private var pageIndex = 0
     @State private var crayonIndex: Int? = 0        // nil means rainbow
     @State private var bounceRegion: Int?

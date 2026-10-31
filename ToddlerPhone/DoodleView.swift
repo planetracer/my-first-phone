@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct DoodleView: View {
+    @StateObject private var familyStore = FamilyStore.shared
     @State private var strokes: [Stroke] = []
     @State private var current: Stroke?
     @State private var selectedColor: Color = Palette.red
@@ -111,7 +112,7 @@ struct DoodleView: View {
                 }
                 .buttonStyle(BouncyButtonStyle())
 
-                if FamilyStore.shared.isConnected {
+                if familyStore.isConnected {
                     Button {
                         sendToFamily()
                     } label: {

@@ -229,6 +229,7 @@ struct WeatherCard: Identifiable, Equatable {
 
 struct DressUpView: View {
     @Environment(\.dismiss) private var dismiss
+    @StateObject private var familyStore = FamilyStore.shared
 
     @AppStorage("dressStars") private var stars = 0
     @AppStorage("dressLook0") private var look0 = -1
@@ -332,7 +333,7 @@ struct DressUpView: View {
                 blinking = false
             }
         }
-        .onChange(of: outfit) { _, _ in
+        .onChange(of: outfit) { _ in
             bounceCharacter()
             checkWeather()
         }
@@ -368,7 +369,7 @@ struct DressUpView: View {
         }
         .buttonStyle(BouncyButtonStyle())
 
-        if FamilyStore.shared.isConnected {
+        if familyStore.isConnected {
             Button {
                 sendToFamily()
             } label: {

@@ -17,7 +17,7 @@ struct ParentAccessView: View {
 
 struct CodePadView: View {
     let onSuccess: () -> Void
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var entered = ""
     @State private var shake = false
@@ -124,9 +124,9 @@ struct CodePadView: View {
 }
 
 struct ParentGateView: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
-    @State private var library = VideoLibrary.shared
+    @StateObject private var library = VideoLibrary.shared
     @State private var didReset = false
     @State private var testResult: String?
     @State private var testing = false
@@ -137,7 +137,7 @@ struct ParentGateView: View {
     @State private var codeSaved = false
     @AppStorage("classicsEnabled") private var classicsEnabled = true
     @State private var guidedAccessOn = UIAccessibility.isGuidedAccessEnabled
-    @State private var familyStore = FamilyStore.shared
+    @StateObject private var familyStore = FamilyStore.shared
     @State private var joinCode = ""
 
     private var roleBinding: Binding<PhoneRole> {
@@ -268,7 +268,7 @@ struct ParentGateView: View {
                     HStack {
                         TextField("New 4-digit code", text: $newCode)
                             .keyboardType(.numberPad)
-                            .onChange(of: newCode) {
+                            .onChange(of: newCode) { _ in
                                 newCode = String(newCode.filter(\.isNumber).prefix(4))
                                 codeSaved = false
                             }
@@ -353,7 +353,7 @@ struct ParentGateView: View {
                 }
             }
             .navigationTitle("Grown-ups")
-            .onChange(of: model.role) {
+            .onChange(of: model.role) { _ in
                 if model.role == .parent { dismiss() }
             }
             .navigationBarTitleDisplayMode(.inline)
@@ -362,7 +362,7 @@ struct ParentGateView: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .onChange(of: pickedItems) {
+            .onChange(of: pickedItems) { _ in
                 importFromPhotos()
             }
             .onReceive(NotificationCenter.default.publisher(for: UIAccessibility.guidedAccessStatusDidChangeNotification)) { _ in

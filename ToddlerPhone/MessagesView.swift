@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct MessagesView: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     @State private var target: Target?
 
     enum Target: Identifiable {
@@ -18,7 +18,7 @@ struct MessagesView: View {
         }
     }
 
-    @State private var familyStore = FamilyStore.shared
+    @StateObject private var familyStore = FamilyStore.shared
 
     var body: some View {
         ZStack {
@@ -135,7 +135,7 @@ struct MessagesView: View {
 
 struct ChatView: View {
     let contact: Contact
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -156,17 +156,24 @@ struct ChatView: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 12)
                     }
-                    .defaultScrollAnchor(.bottom)
-                    .onChange(of: model.messages(for: contact).count) {
+                    .onChange(of: model.messages(for: contact).count) { _ in
                         if let last = model.messages(for: contact).last {
                             withAnimation(.spring(response: 0.35)) {
                                 proxy.scrollTo(last.id, anchor: .bottom)
                             }
                         }
                     }
+                    // iOS 16 has no bottom default scroll anchor: open on the
+                    // newest message by scrolling there once laid out.
                     .onAppear {
                         if let last = model.messages(for: contact).last {
                             proxy.scrollTo(last.id, anchor: .bottom)
+                        }
+                        Task {
+                            try? await Task.sleep(for: .seconds(0.15))
+                            if let last = model.messages(for: contact).last {
+                                proxy.scrollTo(last.id, anchor: .bottom)
+                            }
                         }
                     }
                 }

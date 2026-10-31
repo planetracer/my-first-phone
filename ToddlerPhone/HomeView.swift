@@ -1,9 +1,9 @@
 import SwiftUI
 
 struct RootView: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
 
-    @State private var callEngine = CallEngine.shared
+    @StateObject private var callEngine = CallEngine.shared
     @State private var quietNow = false
 
     var body: some View {
@@ -90,7 +90,7 @@ struct RootView: View {
 }
 
 struct HomeView: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     @State private var showParentSheet = false
 
     private static let apps: [(icon: String, label: String, color: Color, screen: AppScreen)] = [
@@ -188,7 +188,7 @@ struct HomeView: View {
 
 /// Full-screen bedtime lock shown during quiet hours on the kid phone.
 struct BedtimeView: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     let onUnlock: () -> Void
     @State private var showCodePad = false
 

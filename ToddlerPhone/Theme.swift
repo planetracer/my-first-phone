@@ -59,6 +59,19 @@ enum Sfx {
     }
 }
 
+// MARK: - Microphone permission
+
+/// Asks for microphone access. The AVAudioApplication record-permission API
+/// is iOS 17+, so this wraps the iOS 16 callback API and keeps `await` at the
+/// call sites.
+func requestRecordPermissionCompat() async -> Bool {
+    await withCheckedContinuation { continuation in
+        AVAudioSession.sharedInstance().requestRecordPermission { granted in
+            continuation.resume(returning: granted)
+        }
+    }
+}
+
 /// Synthesizes all sound effects with AVAudioEngine. Using a `.playback`
 /// audio session means sounds work even with the silent switch on —
 /// system-sound IDs (the previous approach) are always muted by the switch.
@@ -443,7 +456,7 @@ struct InitialsAvatar: View {
 
 /// Top bar with a Home button, used inside every "app".
 struct TopBar: View {
-    @Environment(AppModel.self) private var model
+    @EnvironmentObject private var model: AppModel
     let title: String
 
     var body: some View {

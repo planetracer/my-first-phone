@@ -5,10 +5,9 @@ import AVFoundation
 // MARK: - Video library (parent-managed, stored in app Documents)
 
 @MainActor
-@Observable
-final class VideoLibrary {
+final class VideoLibrary: ObservableObject {
     static let shared = VideoLibrary()
-    var videos: [URL] = []
+    @Published var videos: [URL] = []
 
     nonisolated static var videosDir: URL {
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -196,8 +195,7 @@ struct ClassicShow: Identifiable {
 // MARK: - Poster cache (one download per show, decode off the main thread)
 
 @MainActor
-@Observable
-final class PosterCache {
+final class PosterCache: ObservableObject {
     static let shared = PosterCache()
 
     private var images: [String: UIImage] = [:]
@@ -261,7 +259,7 @@ enum ChannelKind: String, CaseIterable, Identifiable {
 }
 
 struct TVView: View {
-    @State private var library = VideoLibrary.shared
+    @StateObject private var library = VideoLibrary.shared
     @State private var selection: TVSelection?
     @AppStorage("classicsEnabled") private var classicsEnabled = true
 
@@ -392,7 +390,6 @@ struct TVView: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 6)
         }
-        .scrollClipDisabled()
     }
 
     private func play(_ show: ClassicShow) {

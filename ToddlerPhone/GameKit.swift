@@ -212,7 +212,7 @@ struct StarChip: View {
         .padding(.vertical, 10)
         .card(cornerRadius: 18)
         .scaleEffect(bounce ? 1.18 : 1)
-        .onChange(of: count) { _, _ in
+        .onChange(of: count) { _ in
             withAnimation(.spring(response: 0.2, dampingFraction: 0.45)) { bounce = true }
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(0.16))

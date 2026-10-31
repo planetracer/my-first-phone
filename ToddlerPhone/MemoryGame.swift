@@ -610,7 +610,7 @@ private struct CardView: View {
         }
         .buttonStyle(BouncyButtonStyle())
         .disabled(card.matched)
-        .onChange(of: card.matched) { _, matched in
+        .onChange(of: card.matched) { matched in
             guard matched else { return }
             burst = true
             Task { @MainActor in

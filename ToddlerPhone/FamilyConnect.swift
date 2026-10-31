@@ -21,22 +21,21 @@ struct FamilyMessage: Identifiable, Equatable {
 }
 
 @MainActor
-@Observable
-final class FamilyStore {
+final class FamilyStore: ObservableObject {
     static let shared = FamilyStore()
 
-    var code: String? = UserDefaults.standard.string(forKey: "familyCode") {
+    @Published var code: String? = UserDefaults.standard.string(forKey: "familyCode") {
         didSet { UserDefaults.standard.set(code, forKey: "familyCode") }
     }
-    var displayName: String = UserDefaults.standard.string(forKey: "familyName") ?? "" {
+    @Published var displayName: String = UserDefaults.standard.string(forKey: "familyName") ?? "" {
         didSet { UserDefaults.standard.set(displayName, forKey: "familyName") }
     }
-    var messages: [FamilyMessage] = []
-    var lastError: String?
+    @Published var messages: [FamilyMessage] = []
+    @Published var lastError: String?
     /// Other family members (from their status beacons) — the kid's "contacts".
-    var members: [DeviceStatus] = []
+    @Published var members: [DeviceStatus] = []
     /// Latest "read up to" timestamps of other family members, by name.
-    var readReceipts: [String: Date] = [:]
+    @Published var readReceipts: [String: Date] = [:]
     private var seenRingID: String?
     private var lastReceiptPush = Date.distantPast
 
@@ -44,7 +43,6 @@ final class FamilyStore {
 
     // CKContainer throws an ObjC exception when the app lacks the iCloud
     // entitlement — trapped via the shim so we degrade to an error message.
-    @ObservationIgnored
     private var cachedContainer: CKContainer?
 
     private var container: CKContainer {
@@ -519,7 +517,7 @@ final class VoiceRecorder {
     private var fileURL: URL?
 
     func start() async -> Bool {
-        guard await AVAudioApplication.requestRecordPermission() else { return false }
+        guard await requestRecordPermissionCompat() else { return false }
         let session = AVAudioSession.sharedInstance()
         try? session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
         let url = FileManager.default.temporaryDirectory
@@ -565,7 +563,7 @@ struct FamilyChatView: View {
     /// nil = the whole-family chat; a member name = a one-on-one chat.
     var peer: String? = nil
     @Environment(\.dismiss) private var dismiss
-    @State private var store = FamilyStore.shared
+    @StateObject private var store = FamilyStore.shared
     @State private var draft = ""
     @State private var isRecording = false
     @State private var ringingFrom: String?
@@ -611,7 +609,7 @@ struct FamilyChatView: View {
             }
         }
         .onAppear { rebuildVisibleMessages() }
-        .onChange(of: store.messages.count) { rebuildVisibleMessages() }
+        .onChange(of: store.messages.count) { _ in rebuildVisibleMessages() }
         .task {
             var lastReceiptFetch = Date.distantPast
             while !Task.isCancelled {
@@ -668,10 +666,22 @@ struct FamilyChatView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
             }
-            .defaultScrollAnchor(.bottom)
-            .onChange(of: visibleMessages.count) {
+            .onChange(of: visibleMessages.count) { _ in
                 if let last = visibleMessages.last {
                     withAnimation(.spring(response: 0.35)) {
+                        proxy.scrollTo(last.id, anchor: .bottom)
+                    }
+                }
+            }
+            // iOS 16 has no bottom default scroll anchor: open on the newest
+            // message by scrolling there once the first layout pass is done.
+            .onAppear {
+                if let last = visibleMessages.last {
+                    proxy.scrollTo(last.id, anchor: .bottom)
+                }
+                Task {
+                    try? await Task.sleep(for: .seconds(0.15))
+                    if let last = visibleMessages.last {
                         proxy.scrollTo(last.id, anchor: .bottom)
                     }
                 }

@@ -1,5 +1,4 @@
 import SwiftUI
-import Observation
 
 enum AppScreen: Equatable {
     case home, phone, messages, camera, books, games, tv, doodle, coloring, sounds, flashlight
@@ -94,15 +93,14 @@ struct Message: Identifiable, Equatable {
     let isFromChild: Bool
 }
 
-@Observable
-final class AppModel {
-    var screen: AppScreen = .home
-    var chats: [String: [Message]] = [:]
-    var role: PhoneRole? = UserDefaults.standard.string(forKey: "phoneRole").flatMap(PhoneRole.init) {
+final class AppModel: ObservableObject {
+    @Published var screen: AppScreen = .home
+    @Published var chats: [String: [Message]] = [:]
+    @Published var role: PhoneRole? = UserDefaults.standard.string(forKey: "phoneRole").flatMap(PhoneRole.init) {
         didSet { UserDefaults.standard.set(role?.rawValue, forKey: "phoneRole") }
     }
     /// Parent temporarily browsing the kid apps from grown-up mode (not persisted).
-    var kidPreview = false
+    @Published var kidPreview = false
 
     init() {
         seedChats()
@@ -156,23 +154,35 @@ final class AppModel {
 
     var quietEnabled: Bool {
         get { UserDefaults.standard.bool(forKey: "quietEnabled") }
-        set { UserDefaults.standard.set(newValue, forKey: "quietEnabled") }
+        set {
+            objectWillChange.send()
+            UserDefaults.standard.set(newValue, forKey: "quietEnabled")
+        }
     }
 
     /// Minutes from midnight; defaults 7:30 pm – 7:00 am.
     var quietStart: Int {
         get { UserDefaults.standard.object(forKey: "quietStart") as? Int ?? 19 * 60 + 30 }
-        set { UserDefaults.standard.set(newValue, forKey: "quietStart") }
+        set {
+            objectWillChange.send()
+            UserDefaults.standard.set(newValue, forKey: "quietStart")
+        }
     }
 
     var quietEnd: Int {
         get { UserDefaults.standard.object(forKey: "quietEnd") as? Int ?? 7 * 60 }
-        set { UserDefaults.standard.set(newValue, forKey: "quietEnd") }
+        set {
+            objectWillChange.send()
+            UserDefaults.standard.set(newValue, forKey: "quietEnd")
+        }
     }
 
     var quietOverrideUntil: Date? {
         get { UserDefaults.standard.object(forKey: "quietOverrideUntil") as? Date }
-        set { UserDefaults.standard.set(newValue, forKey: "quietOverrideUntil") }
+        set {
+            objectWillChange.send()
+            UserDefaults.standard.set(newValue, forKey: "quietOverrideUntil")
+        }
     }
 
     func isQuietNow(_ date: Date = .now) -> Bool {
@@ -202,7 +212,10 @@ final class AppModel {
     /// 4-digit code protecting the grown-ups area. Changeable by the parent.
     var parentCode: String {
         get { UserDefaults.standard.string(forKey: "parentCode") ?? Self.defaultParentCode }
-        set { UserDefaults.standard.set(newValue, forKey: "parentCode") }
+        set {
+            objectWillChange.send()
+            UserDefaults.standard.set(newValue, forKey: "parentCode")
+        }
     }
 
     var parentCodeIsDefault: Bool { parentCode == Self.defaultParentCode }

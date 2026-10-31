@@ -4,12 +4,12 @@ import UserNotifications
 @main
 struct ToddlerPhoneApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @State private var model = AppModel()
+    @StateObject private var model = AppModel()
 
     var body: some Scene {
         WindowGroup {
             RootView()
-                .environment(model)
+                .environmentObject(model)
                 .statusBarHidden()
                 .persistentSystemOverlays(.hidden)
                 // The app uses a fixed light palette; keep system controls matching.
